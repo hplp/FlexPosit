@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flexposit"
+version = "0.1.0"
+description = "FlexPosit: mixed-precision Posit quantization framework for LLMs."
+readme = "README.md"
+requires-python = ">=3.10"
+# Runtime dependencies are pinned in requirements.txt for behavioral equivalence
+# with the MICRO 2026 AE artifact. Install via:  bash install.sh
+dependencies = []
+
+[tool.setuptools.packages.find]
+include = ["flexposit*"]
+exclude = ["tests*", "scripts*", "examples*", "docs*"]

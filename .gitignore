@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+build/
+dist/
+.eggs/
+.pytest_cache/
+
+# Local run outputs — not committed
+results/
+quant_out_*/
+eval_out/
+logs/
+*.out
+*.err
+sbatch_logs/
+
+# HuggingFace / dataset caches
+hf_cache/
+.cache/
+
+# Editors / IDE
+.idea/
+.vscode/
+.DS_Store
+
+# Env
+.env
