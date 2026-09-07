@@ -471,6 +471,7 @@ def main():
                 "channels_applied": applied_ch,
                 "ppl": f"{ppl:.6f}"
             })
+            fcsv.flush()
             print(f"[Sweep 0] k={applied_k}/{total_cand}  achieved={achieved_bits:.3f} bits  PPL={ppl:.4f}")
             xs.append(achieved_bits); ys.append(ppl)
 
@@ -500,6 +501,7 @@ def main():
                     "channels_applied": applied_ch,
                     "ppl": f"{ppl:.6f}"
                 })
+                fcsv.flush()
                 print(f"[Sweep {i}] target={tgt:.3f}  k={applied_k}/{total_cand}  "
                       f"achieved={achieved_bits:.3f} bits  PPL={ppl:.4f}")
                 xs.append(achieved_bits); ys.append(ppl)
