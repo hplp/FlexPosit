@@ -1,12 +1,20 @@
 # FlexPosit: Tunable Fractional Precision for LLM Inference Accelerators (MICRO 2026)
 
-This repo is the FlexPosit mixed-precision quantization framework.
+<p align="center">
+  <img src="assets/artifacts_available_v1_1.png" height="100">
+  <img src="assets/artifacts_evaluated_functional_v1_1.png" height="100">
+  <img src="assets/results_reproduced_v1_1.png" height="100">
+</p>
 
 FlexPosit received all three MICRO 2026 artifact badges:
 **Artifacts Available**, **Artifacts Evaluated — Functional**, and **Results Reproduced**. 
 
 For exact paper reproduction (Tables 2-6, Figs 11-12, Table 10), use the
 MICRO 2026 artifact: https://github.com/hplp/FlexPosit_artifact
+
+
+
+This repo is the FlexPosit mixed-precision quantization framework.
 
 ## Install
 
