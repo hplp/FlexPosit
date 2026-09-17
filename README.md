@@ -2,6 +2,9 @@
 
 This repo is the FlexPosit mixed-precision quantization framework.
 
+FlexPosit received all three MICRO 2026 artifact badges:
+**Artifacts Available**, **Artifacts Evaluated — Functional**, and **Results Reproduced**. 
+
 For exact paper reproduction (Tables 2-6, Figs 11-12, Table 10), use the
 MICRO 2026 artifact: https://github.com/hplp/FlexPosit_artifact
 
