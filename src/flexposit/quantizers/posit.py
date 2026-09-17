@@ -22,7 +22,6 @@ from flexposit.models import MODEL_PRESETS
 transformers.logging.set_verbosity_error()
 EPS = 1e-8
 
-# -------------------- Args --------------------
 def get_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), default="mistral-7b")
@@ -73,7 +72,6 @@ def get_torch_dtype(tag: str):
         return torch.bfloat16
     return torch.float32
 
-# -------------------- Act quant hook --------------------
 def make_act_hook(use_act: bool, exp_bits: int, man_bits: int):
     if not use_act:
         def passthrough(_m, inputs): return inputs
@@ -89,7 +87,6 @@ def make_act_hook(use_act: bool, exp_bits: int, man_bits: int):
 
     return hook
 
-# -------------------- Layer filters --------------------
 def is_quant_linear(mod: nn.Module):
     if isinstance(mod, nn.Linear):
         return True
@@ -140,7 +137,6 @@ def summarize_format_usage(ch_meta):
     ratios = {k: (v / total if total > 0 else 0.0) for k, v in counts.items()}
     return {"total_channels": total, "counts": counts, "ratios": ratios}
 
-# -------------------- GPU-friendly per-channel search --------------------
 @torch.no_grad()
 def _per_channel_sqnr_search_batched(
     flat: torch.Tensor,
@@ -318,7 +314,6 @@ def make_fwd_autocast(device: torch.device, forward_dtype: str):
     return lambda: _NoOp()
 
 
-# -------------------- Main --------------------
 def main():
     args = get_args()
     device = torch.device(args.device)

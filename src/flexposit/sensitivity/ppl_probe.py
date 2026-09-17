@@ -51,7 +51,6 @@ def load_completed_windows(csv_path: str):
     return done
 
 
-# -------------------- Args --------------------
 def get_args():
     p = argparse.ArgumentParser()
     p.add_argument("--model", choices=list(MODEL_PRESETS.keys()), default=None,
@@ -114,7 +113,6 @@ def get_torch_dtype(tag: str):
     return torch.float16 if tag == "fp16" else torch.float32
 
 
-# -------------------- Layer selectors --------------------
 def is_quant_linear(mod):
     # GPT-2 uses modeling_utils.Conv1D for linears; OPT/LLaMA use nn.Linear
     return isinstance(mod, (nn.Linear, modeling_utils.Conv1D))
@@ -128,7 +126,6 @@ def should_skip_layer(name: str, mod: nn.Module, skip_lm_head: bool, quantize_em
     return False
 
 
-# -------------------- OOM-safe vectorized GPU search (per window) --------------------
 @torch.no_grad()
 def _vectorized_search_quantize_block_tiled(
     W_block_cpu_f32: torch.Tensor,    # [Cw, K] CPU float32
@@ -273,7 +270,6 @@ def quantize_window_gpu(
     return out.view(W.shape)  # CPU float32
 
 
-# -------------------- chunked non-overlapping PPL --------------------
 @torch.no_grad()
 def encode_wikitext2_cpu(tokenizer) -> torch.Tensor:
     test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
@@ -353,7 +349,6 @@ def eval_wikitext_batched(model, ids_cpu: torch.Tensor, seqlen: int,
     return float(ppl)
 
 
-# -------------------- Main --------------------
 def main():
     args = get_args()
     out_dir = args.out_dir or os.path.join(

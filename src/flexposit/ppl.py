@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
-# ppl.py — Load a saved checkpoint (or HF model) and eval WikiText-2 PPL
-#                   with optional per-Linear FP8 (E4M3) activation quantization.
-#
-# Used by 06_act_quant.sh to reproduce Table VI (weight × activation quant).
+# ppl.py — Load a saved checkpoint (or HF model) and eval WikiText-2 PPL,
+# with optional per-Linear FP8 (E4M3) activation quantization.
 
 import argparse, math, torch
 import torch.nn as nn

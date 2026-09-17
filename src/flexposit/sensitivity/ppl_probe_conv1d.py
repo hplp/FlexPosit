@@ -7,7 +7,7 @@
 #
 # Requirements:
 #   * The base checkpoint (--model_dir) must already be quantized on the
-#     per-Cout axis (see gate0_partA/per_cout/quantize_posit41_per_cout.py).
+#     per-Cout axis (see flexposit.quantizers.posit / scripts/01_quantize_base.sh).
 #   * FP reference (--ref_model_id) is loaded from HF and consulted layer-wise;
 #     for Conv1D we transpose it before window search and transpose back at
 #     the write step so mod.weight retains its native (Cin, Cout) storage.

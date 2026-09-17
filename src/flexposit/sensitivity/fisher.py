@@ -90,7 +90,7 @@ def enumerate_windows(model, channel_window, override_nsize, skip_lm_head=True):
     if n_conv1d_skipped > 0:
         print(f"[warn] skipped {n_conv1d_skipped} Conv1D layers — Fisher standalone "
               f"path is nn.Linear-only. For GPT-2, pass --input_sens_csv from a "
-              f"prior flexposit.sensitivity.conv1d run.", flush=True)
+              f"prior flexposit.sensitivity.ppl_probe_conv1d run.", flush=True)
     return windows
 
 

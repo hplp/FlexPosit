@@ -55,9 +55,7 @@ REF_PC = {
     "qwen2.5-7b": 7.82, "deepseek-llm-7b": 8.34, "mistral-7b": 7.24, "qwen2.5-14b": 6.79,
 }
 
-# ---------------------------------------------------------------------------
 # Backend selection
-# ---------------------------------------------------------------------------
 BACKEND = None       # "mx" or "qtorch"
 _MX_QUANT = None     # callable W->W_q (mx path)
 MXFP8_MAX = None     # qtorch path

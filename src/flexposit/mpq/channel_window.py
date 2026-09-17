@@ -33,7 +33,6 @@ from flexposit.models import MODEL_PRESETS
 transformers.logging.set_verbosity_error()
 EPS = 1e-8
 
-# ------------------- Args -------------------
 def get_args():
     p = argparse.ArgumentParser()
     # I/O
@@ -105,7 +104,6 @@ def get_args():
 def get_torch_dtype(tag: str):
     return torch.float16 if tag == "fp16" else torch.float32
 
-# ------------------- Model helpers -------------------
 def is_quant_linear(mod):
     if isinstance(mod, nn.Linear):
         return True
@@ -120,7 +118,6 @@ def should_skip_layer(name: str, mod: nn.Module, skip_lm_head: bool, quantize_em
         return True
     return False
 
-# ------------------- Read sensitivity CSV (per-window) -------------------
 def read_sensitivity_windows(csv_path: str) -> List[Tuple[str, int, int, float, int]]:
     """
     Return rows as: (layer, win_start, win_end, delta_ppl, channel_window)
@@ -143,7 +140,6 @@ def read_sensitivity_windows(csv_path: str) -> List[Tuple[str, int, int, float, 
                 rows.append((layer, ws, we, dp, max(1, cw)))
     return rows
 
-# ------------------- Quant helpers (CPU search) -------------------
 @torch.no_grad()
 def _best_scale_es_for_vec(w_vec: torch.Tensor, nsize: int, es_cands, sweep_scales):
     sp = torch.sum(w_vec ** 2) + EPS
@@ -188,7 +184,6 @@ def quantize_window_cpu_from_fp32(fp32_w: torch.Tensor,
     out[start:end] = q_block
     return out.view_as(W)
 
-# ------------------- Eval (chunked non-overlapping WT2) -------------------
 @torch.no_grad()
 def encode_wikitext2_cpu(tokenizer) -> torch.Tensor:
     test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
@@ -227,7 +222,6 @@ def eval_ppl_with_ids(model, ids_cpu: torch.Tensor, seqlen: int, use_fp16_fwd: b
             torch.cuda.empty_cache()
     return float(math.exp(nll_sum / (nsamples * seqlen)))
 
-# ------------------- Utility -------------------
 def collect_quantizable_layers(model, skip_lm_head: bool, quantize_embeddings: bool) -> List[str]:
     names = []
     for name, mod in model.named_modules():
@@ -299,7 +293,6 @@ def apply_windows_to_model(model,
         }
     return upgraded
 
-# -------- NEW: candidate ordering helpers for Sweep --------
 def _dedup_windows(rows: List[Tuple[str,int,int,float,int]],
                    allow_positive: bool) -> List[Tuple[str,int,int,float,int]]:
     """Deduplicate by (layer, start, end). Optionally filter ΔPPL >= 0."""
@@ -341,7 +334,6 @@ def _order_candidates(cands: List[Tuple[str,int,int,float,int]],
     # map to (ly, ws, we, cw, dp)
     return [(ly, ws, we, cw, dp) for (ly, ws, we, dp, cw) in ordered]
 
-# ------------------- Main -------------------
 def main():
     args = get_args()
     os.makedirs(args.out_dir, exist_ok=True)
