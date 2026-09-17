@@ -21,10 +21,6 @@ This repo is the FlexPosit mixed-precision quantization framework.
     bash install.sh                    # creates conda env `flexposit`
     conda activate flexposit
 
-The `scripts/*.sh` wrappers respect any conda env you already have active, so
-custom-named envs work without extra flags. If you want them to auto-activate
-a differently-named env when none is active, set `FLEXPOSIT_ENV=<name>`.
-
 Prerequisites: `conda` on PATH, an NVIDIA driver compatible with CUDA 11.8,
 and a CUDA toolkit with `nvcc >= 11.8` on PATH (any 11.8+ works, including
 CUDA 12.x). The toolkit is required because `qtorch_plus` JIT-compiles a

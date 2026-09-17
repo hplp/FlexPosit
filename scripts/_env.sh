@@ -1,15 +1,11 @@
 #!/usr/bin/env bash
-# Sourced by the other scripts. Activates a conda env for FlexPosit and, if the
+# Sourced by the other scripts. Activates the flexposit conda env and, if the
 # default nvcc is < 11.8, points PATH at the newest /usr/local/cuda-* so
 # qtorch_plus's JIT compile can target modern GPU archs.
-#
-# Env activation policy: if the caller already has any conda env active, we
-# respect it (so a pre-activated / custom-named env just works). Only when no
-# env is active do we auto-activate $FLEXPOSIT_ENV (default: flexposit).
 
 FLEXPOSIT_ENV="${FLEXPOSIT_ENV:-flexposit}"
 
-if [[ -z "${CONDA_DEFAULT_ENV:-}" ]]; then
+if [[ "${CONDA_DEFAULT_ENV:-}" != "$FLEXPOSIT_ENV" ]]; then
     if ! command -v conda >/dev/null 2>&1; then
         echo "ERROR: conda not on PATH; cannot activate env '$FLEXPOSIT_ENV'." >&2
         return 1 2>/dev/null || exit 1
