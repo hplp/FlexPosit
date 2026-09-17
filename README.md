@@ -25,11 +25,19 @@ the runtime) is not sufficient. If your default `nvcc` is too old (e.g.
     export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
     bash install.sh
 
-## End-to-end flow
+## Test
 
-Pick a `MODEL` from the shipped set below (each has a pre-computed
-sensitivity CSV in `data/sensitivity/`). Every CLI takes `--model $MODEL`
-and looks up the HuggingFace id itself.
+    pytest tests/
+
+Six tests: package smoke-imports and a Conv1D-axis regression on
+`_to_cout_first` / `_from_cout_first` in `flexposit.quantizers.posit`.
+Takes ~20s once the `qtorch_plus` CUDA extension has JIT-compiled.
+
+## Supported models
+
+Every CLI takes `--model <short_name>` and looks up the HuggingFace id itself
+(see `src/flexposit/models.py`). Each has a pre-computed sensitivity CSV in
+`data/sensitivity/`.
 
 | Short name        | HuggingFace id                       |
 | ----------------- | ------------------------------------ |
@@ -43,60 +51,64 @@ and looks up the HuggingFace id itself.
 | `qwen2.5-7b`      | `Qwen/Qwen2.5-7B`                    |
 | `qwen2.5-14b`     | `Qwen/Qwen2.5-14B`                   |
 
-    export MODEL=phi-2
+## End-to-end flow
 
-Then:
+Two scripts do the work:
 
-    # 1. Quantize weights to Posit(4,1) base
-    python -m flexposit.quantizers.posit \
-        --model $MODEL --nsize 4 --es_candidates 1 \
-        --save_dir out/${MODEL}_posit4
+    bash scripts/01_quantize_base.sh phi-2   # quantize weights to Posit base
+    bash scripts/02_mpq_sweep.sh    phi-2    # MPQ sweep, using the shipped PPL sensitivity CSV
 
-    # 2. Apply mixed-precision sweep using the shipped sensitivity CSV
-    python -m flexposit.mpq.channel_window \
-        --model $MODEL \
-        --base_dir out/${MODEL}_posit4 \
-        --sensitivity_csv data/sensitivity/$MODEL.csv \
-        --sweep_bits_start 4.0 --sweep_bits_end 5.0 \
-        --es_candidates 1 \
-        --out_dir out/mpq_${MODEL}_sweep
+Outputs land in `out/`. Common overrides:
 
-`--nsize 4` selects Posit(4,1); pass `--nsize 5` for Posit(5,1). Replace
-`--sweep_bits_*` with `--target_avg_bits 4.7` for a single target instead
-of a sweep.
+    NSIZE=5 bash scripts/01_quantize_base.sh phi-2                        # Posit(5,1)
+    MPQ_ARGS="--target_avg_bits 4.7" bash scripts/02_mpq_sweep.sh phi-2   # single target
+
+## End-to-end flow (Fisher variant)
+
+Fisher is a faster proxy for the PPL-probe sensitivity and runs on the FP
+reference model directly — no `01_quantize_base.sh` dependency:
+
+    bash scripts/regen_sensitivity_fisher.sh phi-2   # regen sensitivity CSV via Fisher
+    bash scripts/01_quantize_base.sh         phi-2   # quantize weights to Posit base
+    SENS_CSV=out/fisher_phi-2.csv \
+        bash scripts/02_mpq_sweep.sh phi-2           # MPQ sweep, using the Fisher CSV
+
+The first two are independent — run them in parallel to save wallclock.
 
 ## Regenerating sensitivity (optional)
 
-The shipped `data/sensitivity/$MODEL.csv` files are the ones used in the paper.
-Regenerate only if you want a different channel-window, a new model, or an
-alternative sensitivity method. Then feed the regenerated CSV to step 2's
-`--sensitivity_csv` above.
+We ship a PPL-probe CSV per supported model in `data/sensitivity/`.
+Regenerate only if you want a new model, a different channel-window, or a
+different method. Both regenerators write the same schema; plug the result
+into `02_mpq_sweep.sh` via `SENS_CSV=...`.
 
-    # PPL-probe (canonical but slower)
-    python -m flexposit.sensitivity.ppl_probe \
-        --model $MODEL --model_dir out/${MODEL}_posit4 \
-        --channel_window 256 --es_candidates 1 \
-        --out_dir out/sens_${MODEL}
-    # For GPT-2 use flexposit.sensitivity.ppl_probe_conv1d (Conv1D wrapper) instead.
+- **PPL-probe** (canonical, slower). Needs the base checkpoint from
+  `01_quantize_base.sh`; auto-dispatches to the Conv1D-aware variant for GPT-2.
 
-    # Fisher (faster)
-    python -m flexposit.sensitivity.fisher \
-        --model $MODEL --channel_window 256 \
-        --out_csv out/fisher_${MODEL}.csv \
-        --b_low 4 --b_high 5
+      bash scripts/regen_sensitivity_ppl.sh phi-2   # -> out/sens_phi-2/sensitivity.csv
+
+- **Fisher** (faster proxy). No `01_quantize_base.sh` dependency. See the
+  Fisher-variant end-to-end flow above.
 
 ## Layout
 
     src/flexposit/         # importable package
-    ├── models.py          # MODEL_PRESETS: short-name → HF id + load flags
+    ├── models.py          # MODEL_PRESETS: short-name -> HF id + load flags
     ├── ppl.py             # WikiText-2 PPL harness
     ├── quantizers/        # base Posit + comparison baselines (int4, mxfp8)
     ├── mpq/               # mixed-precision drivers (channel_window, layer)
     └── sensitivity/       # sensitivity CSV generators (ppl_probe,
                            #   ppl_probe_conv1d, fisher)
 
-    data/sensitivity/      # nine pre-computed sensitivity CSVs (paper artifacts,
-                           #   one per model at the channel-window used in the paper)
+    data/sensitivity/      # nine pre-computed sensitivity CSVs (one per model
+                           #   at the channel-window used in the paper)
+
+    scripts/               # bash wrappers around the CLIs
+    ├── _env.sh                          # sourced: activate conda, ensure CUDA
+    ├── 01_quantize_base.sh              # -> flexposit.quantizers.posit
+    ├── 02_mpq_sweep.sh                  # -> flexposit.mpq.channel_window
+    ├── regen_sensitivity_ppl.sh         # -> flexposit.sensitivity.ppl_probe[_conv1d]
+    └── regen_sensitivity_fisher.sh      # -> flexposit.sensitivity.fisher
 
 ## Paper & citation
 
