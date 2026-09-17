@@ -1,9 +1,9 @@
 # FlexPosit: Tunable Fractional Precision for LLM Inference Accelerators (MICRO 2026)
 
 <p align="center">
-  <img src="assets/artifacts_available_v1_1.png" height="100">
-  <img src="assets/artifacts_evaluated_functional_v1_1.png" height="100">
-  <img src="assets/results_reproduced_v1_1.png" height="100">
+  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/artifacts_available_v1_1.png" height="100" alt="Artifacts Available"></a>
+  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/artifacts_evaluated_functional_v1_1.png" height="100" alt="Artifacts Evaluated — Functional"></a>
+  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/results_reproduced_v1_1.png" height="100" alt="Results Reproduced"></a>
 </p>
 
 FlexPosit received all three MICRO 2026 artifact badges:
