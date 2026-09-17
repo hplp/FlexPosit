@@ -44,12 +44,8 @@ MODELS = [
     ("qwen2.5-14b",     "Qwen/Qwen2.5-14B",                    2048, True,  False, torch.float16),
 ]
 
-# Buggy PG numbers reported on yg9bq's server (for the report's context column). NaN if unknown.
-BUGGY_PG = {
-    "gpt2-large": 27.71, "qwen2.5-7b": 14.10, "mistral-7b": 99.62,
-    "llama-2-7b": 139.49, "deepseek-llm-7b": 71.17,
-}
-# Existing PC MXFP8 (non-PoT, scale=amax/448) for the PG<=PC sanity check.
+# Reference per-channel MXFP8 (non-PoT, scale=amax/448) baseline for the PG<=PC
+# sanity check. If the printed PG PPL is higher than these, something regressed.
 REF_PC = {
     "gpt2-large": 20.56, "gpt2-xl": 17.94, "phi-2": 11.45, "opt-2.7b": 13.94,
     "qwen2.5-7b": 7.82, "deepseek-llm-7b": 8.34, "mistral-7b": 7.24, "qwen2.5-14b": 6.79,
@@ -202,14 +198,12 @@ def main():
         results.append((short, k, ppl))
 
     print(f"\n========= MXFP8 PG g={GROUP} PPL (WikiText-2) | backend={BACKEND} =========", flush=True)
-    print(f"{'model':18s} {'PG-g32 PPL':>11s} {'was-buggy PG':>13s} {'ref PC':>8s} {'PG<=PC?':>8s}")
+    print(f"{'model':18s} {'PG-g32 PPL':>11s} {'ref PC':>8s} {'PG<=PC?':>8s}")
     for short, k, ppl in results:
-        buggy = BUGGY_PG.get(short, float("nan"))
         refpc = REF_PC.get(short, float("nan"))
         ok = "" if math.isnan(refpc) or math.isnan(ppl) else ("yes" if ppl <= refpc + 1e-6 else "NO")
-        bs = f"{buggy:13.2f}" if not math.isnan(buggy) else f"{'n.a.':>13s}"
         ps = f"{refpc:8.2f}" if not math.isnan(refpc) else f"{'n.a.':>8s}"
-        print(f"{short:18s} {ppl:11.4f} {bs} {ps} {ok:>8s}")
+        print(f"{short:18s} {ppl:11.4f} {ps} {ok:>8s}")
 
     if a.csv_out:
         import csv, os
