@@ -28,8 +28,8 @@ the runtime) is not sufficient. If your default `nvcc` is too old (e.g.
 ## End-to-end flow
 
 Pick a `MODEL` from the shipped set below (each has a pre-computed
-sensitivity CSV in `sensitivity/`). Every CLI takes `--model $MODEL` and
-looks up the HuggingFace id itself.
+sensitivity CSV in `data/sensitivity/`). Every CLI takes `--model $MODEL`
+and looks up the HuggingFace id itself.
 
 | Short name        | HuggingFace id                       |
 | ----------------- | ------------------------------------ |
@@ -56,7 +56,7 @@ Then:
     python -m flexposit.mpq.channel_window \
         --model $MODEL \
         --base_dir out/${MODEL}_posit4 \
-        --sensitivity_csv sensitivity/$MODEL.csv \
+        --sensitivity_csv data/sensitivity/$MODEL.csv \
         --sweep_bits_start 4.0 --sweep_bits_end 5.0 \
         --es_candidates 1 \
         --out_dir out/mpq_${MODEL}_sweep
@@ -67,17 +67,17 @@ of a sweep.
 
 ## Regenerating sensitivity (optional)
 
-The shipped `sensitivity/$MODEL.csv` files are the ones used in the paper.
+The shipped `data/sensitivity/$MODEL.csv` files are the ones used in the paper.
 Regenerate only if you want a different channel-window, a new model, or an
 alternative sensitivity method. Then feed the regenerated CSV to step 2's
 `--sensitivity_csv` above.
 
     # PPL-probe (canonical but slower)
-    python -m flexposit.sensitivity.window \
+    python -m flexposit.sensitivity.ppl_probe \
         --model $MODEL --model_dir out/${MODEL}_posit4 \
         --channel_window 256 --es_candidates 1 \
         --out_dir out/sens_${MODEL}
-    # For GPT-2 use flexposit.sensitivity.conv1d (Conv1D wrapper) instead.
+    # For GPT-2 use flexposit.sensitivity.ppl_probe_conv1d (Conv1D wrapper) instead.
 
     # Fisher (faster)
     python -m flexposit.sensitivity.fisher \
@@ -87,14 +87,16 @@ alternative sensitivity method. Then feed the regenerated CSV to step 2's
 
 ## Layout
 
-    flexposit/
+    src/flexposit/         # importable package
+    ├── models.py          # MODEL_PRESETS: short-name → HF id + load flags
     ├── ppl.py             # WikiText-2 PPL harness
     ├── quantizers/        # base Posit + comparison baselines (int4, mxfp8)
-    ├── mpq/               # mixed-precision drivers (channel-window + layer)
-    └── sensitivity/       # sensitivity CSV generators (window, conv1d, fisher)
+    ├── mpq/               # mixed-precision drivers (channel_window, layer)
+    └── sensitivity/       # sensitivity CSV generators (ppl_probe,
+                           #   ppl_probe_conv1d, fisher)
 
-Nine pre-computed sensitivity CSVs (one per model at the channel-window used
-in the paper) ship in `sensitivity/`.
+    data/sensitivity/      # nine pre-computed sensitivity CSVs (paper artifacts,
+                           #   one per model at the channel-window used in the paper)
 
 ## Paper & citation
 

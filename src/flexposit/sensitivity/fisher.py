@@ -34,7 +34,7 @@ from flexposit.mpq.layer import (
     is_quant_linear, calib_chunks, compute_fisher_diagonal,
     quantize_pc_posit,
 )
-from flexposit.quantizers.posit import MODEL_PRESETS
+from flexposit.models import MODEL_PRESETS
 
 
 DEFAULT_HEADER = ["layer", "win_start", "win_end", "ppl_new", "delta_ppl",

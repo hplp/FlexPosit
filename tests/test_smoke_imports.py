@@ -7,12 +7,13 @@ def test_top_level():
 
 
 def test_all_modules_import():
+    import flexposit.models
     import flexposit.ppl
     import flexposit.quantizers.posit
     import flexposit.quantizers.int4
     import flexposit.quantizers.mxfp8
     import flexposit.mpq.channel_window
     import flexposit.mpq.layer
-    import flexposit.sensitivity.window
-    import flexposit.sensitivity.conv1d
+    import flexposit.sensitivity.ppl_probe
+    import flexposit.sensitivity.ppl_probe_conv1d
     import flexposit.sensitivity.fisher

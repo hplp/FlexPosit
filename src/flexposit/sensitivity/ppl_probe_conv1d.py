@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# conv1d.py — Conv1D per-Cout wrapper around sensitivity.window.
+# ppl_probe_conv1d.py — Conv1D per-Cout wrapper around sensitivity.ppl_probe.
 #
-# Wrapper around sensitivity/window.py that transposes HF Conv1D
+# Wrapper around sensitivity/ppl_probe.py that transposes HF Conv1D
 # weights before applying the window scan, so that windows walk along Cout
 # (not Cin). nn.Linear layers are unchanged.
 #
@@ -28,8 +28,8 @@ import transformers
 import transformers.modeling_utils as modeling_utils
 
 # Reuse the sibling channel-window PPL-probe generator.
-from . import window as sens_up  # noqa: E402
-from flexposit.quantizers.posit import MODEL_PRESETS
+from . import ppl_probe as sens_up  # noqa: E402
+from flexposit.models import MODEL_PRESETS
 
 
 def load_completed_windows(csv_path: str):

@@ -25,7 +25,7 @@ import transformers.modeling_utils as modeling_utils
 # posit quantize kernel
 from qtorch_plus.quant import posit_quantize
 
-from flexposit.quantizers.posit import MODEL_PRESETS
+from flexposit.models import MODEL_PRESETS
 
 transformers.logging.set_verbosity_error()
 EPS = 1e-8
