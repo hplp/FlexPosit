@@ -75,7 +75,7 @@ def get_args():
                    help="nsize used when testing each layer")
     p.add_argument("--channel_window", type=int, default=64,
                    help="group size of channels per evaluation (per-channel if 1)")
-    p.add_argument("--es_candidates", type=int, nargs="+", default=[0,1,2],
+    p.add_argument("--es_candidates", type=int, nargs="+", default=[1],
                    help="posit 'es' candidates per channel")
     p.add_argument("--log2_min", type=int, default=-8, help="min log2(scale) included")
     p.add_argument("--log2_max", type=int, default=9,  help="max log2(scale) included")

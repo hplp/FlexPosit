@@ -7,12 +7,10 @@
 </p>
 
 FlexPosit received all three MICRO 2026 artifact badges:
-**Artifacts Available**, **Artifacts Evaluated — Functional**, and **Results Reproduced**. 
+**Artifacts Available**, **Artifacts Evaluated — Functional**, and **Results Reproduced**.
 
 For exact paper reproduction (Tables 2-6, Figs 11-12, Table 10), use the
 MICRO 2026 artifact: https://github.com/hplp/FlexPosit_artifact
-
-
 
 This repo is the FlexPosit mixed-precision quantization framework.
 
@@ -117,6 +115,58 @@ into `02_mpq_sweep.sh` via `SENS_CSV=...`.
     ├── 02_mpq_sweep.sh                  # -> flexposit.mpq.channel_window
     ├── regen_sensitivity_ppl.sh         # -> flexposit.sensitivity.ppl_probe[_conv1d]
     └── regen_sensitivity_fisher.sh      # -> flexposit.sensitivity.fisher
+
+## Parameter tuning
+
+The scripts pass through env vars and `MPQ_ARGS` to the underlying CLIs. Every
+python module also takes `--help` for the full list. Common tweaks below —
+this repo is the framework, so mix and match freely; for locked, exact-paper
+reproduction use `FlexPosit_artifact` instead.
+
+**Precision target modes**
+
+    # single target avg bits (budget mode)
+    MPQ_ARGS="--target_avg_bits 4.5" bash scripts/02_mpq_sweep.sh phi-2
+
+    # full Pareto sweep, writes ppl_vs_avg_bits.csv
+    MPQ_ARGS="--sweep_bits_start 4.0 --sweep_bits_end 5.0 --sweep_bits_step 0.1" \
+        bash scripts/02_mpq_sweep.sh phi-2
+
+    # PPL goal instead of bit budget — upgrade greedily until PPL <= target
+    MPQ_ARGS="--ppl_goal 12.5" bash scripts/02_mpq_sweep.sh phi-2
+
+**Base Posit precision**
+
+    NSIZE=5 bash scripts/01_quantize_base.sh phi-2                        # Posit(5,1) base
+
+**Sensitivity strategy (ablations)**
+
+    # random window ordering, seeded — for random-baseline comparisons
+    MPQ_ARGS="--sweep_bits_start 4.0 --sweep_bits_end 5.0 \
+              --sweep_strategy random --random_seed 42" \
+        bash scripts/02_mpq_sweep.sh phi-2
+
+    # location-based (deterministic by layer index)
+    MPQ_ARGS="--sweep_bits_start 4.0 --sweep_bits_end 5.0 --sweep_strategy location" \
+        bash scripts/02_mpq_sweep.sh phi-2
+
+**Channel-window granularity** (when regenerating sensitivity)
+
+    CHANNEL_WINDOW=128 bash scripts/regen_sensitivity_fisher.sh phi-2      # finer
+    CHANNEL_WINDOW=512 bash scripts/regen_sensitivity_fisher.sh phi-2      # coarser
+
+**Downgrade mode** (fewer iterations when target > (base+upgrade)/2)
+
+    # start from Posit(5,1) base, downgrade least-sensitive windows to Posit(4,1)
+    NSIZE=5 bash scripts/01_quantize_base.sh phi-2
+    MPQ_ARGS="--target_avg_bits 4.9 --downgrade" bash scripts/02_mpq_sweep.sh phi-2
+
+**Activation quantization** (FP8-E4M3 per-token dynamic, on top of weight-quant)
+
+    python -m flexposit.ppl --model out/mpq_phi-2_t4.5 --act_quant fp8_e4m3
+
+Full CLI reference: `python -m flexposit.mpq.channel_window --help` and
+`python -m flexposit.quantizers.posit --help`.
 
 ## Paper & citation
 

@@ -40,7 +40,7 @@ def get_args():
         help="Weight format alias (posit4 → nsize=4, posit5 → nsize=5). "
              "Optional — if omitted, derived from --nsize."
     )
-    p.add_argument("--es_candidates", type=int, nargs="+", default=[0, 1, 2])
+    p.add_argument("--es_candidates", type=int, nargs="+", default=[1])
     p.add_argument("--log2_min", type=int, default=-8)
     p.add_argument("--log2_max", type=int, default=9)
 
