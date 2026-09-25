@@ -20,6 +20,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import transformers
 from transformers.pytorch_utils import Conv1D
 
+from flexposit.api import sensitivity_csv
 from flexposit.formats import posit_quantize
 
 from flexposit.models import MODEL_PRESETS
@@ -38,7 +39,8 @@ def get_args():
     p.add_argument("--base_dir", required=True)
     p.add_argument("--fp32_reference_dir", default=None,
                    help="HF id or local FP checkpoint dir. Optional if --model is given.")
-    p.add_argument("--sensitivity_csv", required=True)
+    p.add_argument("--sensitivity_csv", required=True,
+                   help="Sensitivity CSV path, or a shipped model short name (e.g. phi-2).")
     p.add_argument("--out_dir", required=True)
 
     # quantization knobs
@@ -108,7 +110,7 @@ def read_sensitivity_windows(csv_path: str) -> List[Tuple[str, int, int, float, 
     Return rows as: (layer, win_start, win_end, delta_ppl, channel_window)
     """
     rows = []
-    with open(csv_path, "r") as f:
+    with open(sensitivity_csv(csv_path), "r") as f:
         r = csv.DictReader(f)
         for row in r:
             layer = (row.get("layer") or "").strip()

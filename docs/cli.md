@@ -35,7 +35,8 @@ The first two are independent — run them in parallel to save wallclock.
 
 ## Regenerating sensitivity (optional)
 
-We ship a PPL-probe CSV per supported model in `data/sensitivity/`.
+We ship a PPL-probe CSV per supported model in `src/flexposit/data/sensitivity/`
+(installed with the package; pass the model short name, e.g. `sensitivity="phi-2"`).
 Regenerate only if you want a new model, a different channel-window, or a
 different method. Both regenerators write the same schema; plug the result
 into `02_mpq_sweep.sh` via `SENS_CSV=...` or into `flexposit.quantize` via

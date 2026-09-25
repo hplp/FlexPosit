@@ -7,7 +7,7 @@ set -euo pipefail
 MODEL="${1:-${MODEL:-phi-2}}"
 NSIZE="${NSIZE:-4}"
 BASE_DIR="${BASE_DIR:-out/${MODEL}_posit${NSIZE}}"
-SENS_CSV="${SENS_CSV:-data/sensitivity/${MODEL}.csv}"
+SENS_CSV="${SENS_CSV:-src/flexposit/data/sensitivity/${MODEL}.csv}"
 OUT_DIR="${OUT_DIR:-out/mpq_${MODEL}_sweep}"
 MPQ_ARGS="${MPQ_ARGS:---sweep_bits_start 4.0 --sweep_bits_end 5.0}"
 
@@ -18,7 +18,7 @@ source "$REPO_ROOT/scripts/_env.sh"
 
 if [[ ! -f "$SENS_CSV" ]]; then
     echo "ERROR: sensitivity CSV not found: $SENS_CSV" >&2
-    echo "       Shipped: $(ls data/sensitivity/ 2>/dev/null | tr '\n' ' ')" >&2
+    echo "       Shipped: $(ls src/flexposit/data/sensitivity/ 2>/dev/null | tr '\n' ' ')" >&2
     exit 1
 fi
 if [[ ! -d "$BASE_DIR" ]]; then

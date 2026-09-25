@@ -7,9 +7,9 @@ paper's results exactly, use
 [FlexPosit_artifact](https://github.com/hplp/FlexPosit_artifact).
 
 <p align="center">
-  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/artifacts_available_v1_1.png" height="100" alt="Artifacts Available"></a>
-  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/artifacts_evaluated_functional_v1_1.png" height="100" alt="Artifacts Evaluated — Functional"></a>
-  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/results_reproduced_v1_1.png" height="100" alt="Results Reproduced"></a>
+  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="https://raw.githubusercontent.com/hplp/FlexPosit/main/assets/artifacts_available_v1_1.png" height="100" alt="Artifacts Available"></a>
+  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="https://raw.githubusercontent.com/hplp/FlexPosit/main/assets/artifacts_evaluated_functional_v1_1.png" height="100" alt="Artifacts Evaluated — Functional"></a>
+  <a href="https://github.com/hplp/FlexPosit_artifact"><img src="https://raw.githubusercontent.com/hplp/FlexPosit/main/assets/results_reproduced_v1_1.png" height="100" alt="Results Reproduced"></a>
 </p>
 
 FlexPosit is a Posit-based mixed-precision quantization framework for LLMs.
@@ -21,14 +21,22 @@ This repo contains:
 
 - **`flexposit`**, a Python package for quantizing HuggingFace models with
   FlexPosit.
-- **[`hardware/`](hardware/)**, the RTL of the FlexPosit datapath, part of the
+- **[`hardware/`](https://github.com/hplp/FlexPosit/blob/main/hardware)**, the RTL of the FlexPosit datapath, part of the
   test-chip version of FlexPosit in an ongoing 12 nm tapeout shuttle.
 
 ## Install
 
 ```bash
-pip install -e .            # Python >= 3.10; includes WikiText-2 perplexity
-pip install -e ".[eval]"    # optional: adds lm-evaluation-harness for downstream tasks (ARC, HellaSwag, ...)
+pip install flexposit               # Python >= 3.10; includes WikiText-2 perplexity
+pip install "flexposit[eval]"       # optional: adds lm-evaluation-harness for downstream tasks (ARC, HellaSwag, ...)
+```
+
+For the command-line scripts and the hardware, clone the repo and install it
+in editable mode instead:
+
+```bash
+git clone https://github.com/hplp/FlexPosit && cd FlexPosit
+pip install -e ".[dev]"
 ```
 
 ## Quick start
@@ -42,10 +50,9 @@ import flexposit
 
 model, tok = flexposit.load_model("mistral-7b")          # preset name, HF id or local path
 
-# 4.4 bits on average, using the shipped sensitivity ranking
+# 4.4 bits on average, using the sensitivity ranking shipped for this model
 # (uniform Posit(4,1) is bits=4.0 and needs no sensitivity)
-state = flexposit.quantize(model, flexposit.FlexPositConfig(bits=4.4),
-                           sensitivity="data/sensitivity/mistral-7b.csv")
+state = flexposit.quantize(model, flexposit.FlexPositConfig(bits=4.4), sensitivity="mistral-7b")
 
 print(flexposit.wikitext2_perplexity(model, tok))        # WikiText-2, seqlen 2048
 flexposit.eval.lm_eval(model, tok, ["arc_easy"])         # any lm-eval task
@@ -68,12 +75,12 @@ WikiText-2 perplexity at each step. Results go to `out/`.
 The shipped sensitivity CSVs hold the PPL-based sensitivity used in the paper.
 You can also profile your own, with a different configuration (e.g. the
 channel-window size, i.e. the granularity) or a different method (a Fisher-based
-one is provided). See [docs/cli.md](docs/cli.md) for these options and
+one is provided). See [docs/cli.md](https://github.com/hplp/FlexPosit/blob/main/docs/cli.md) for these options and
 the tests.
 
 ## Hardware
 
-[`hardware/`](hardware/) holds the RTL of a bit-serial FlexPosit accelerator
+[`hardware/`](https://github.com/hplp/FlexPosit/blob/main/hardware) holds the RTL of a bit-serial FlexPosit accelerator
 whose Posit precision (4–8 bits) changes per channel window at runtime.
 
 ```bash
@@ -88,8 +95,9 @@ tiles through the whole array.
 
 ## Supported models
 
-Each has a pre-computed sensitivity CSV in `data/sensitivity/`; the CLIs and
-the Python API accept the short names.
+Each has a pre-computed sensitivity CSV bundled with the package
+(`flexposit.shipped_sensitivity()`); the CLIs and the Python API accept the
+short names, both for the model and for `sensitivity=`.
 
 | Short name        | HuggingFace id                       |
 | ----------------- | ------------------------------------ |
@@ -106,11 +114,20 @@ the Python API accept the short names.
 ## Layout
 
     src/flexposit/       Python package (API, quantizers, mixed precision, sensitivity)
+    src/flexposit/data/  sensitivity CSVs for the supported models
     scripts/             shell wrappers for the command-line workflow
-    data/sensitivity/    sensitivity CSVs for the supported models
     hardware/            RTL, testbenches and bit-exact model
     docs/cli.md          command-line guide
     tests/               test suite
+
+## Development
+
+    pip install -e ".[dev]"
+    ruff check src tests
+    pytest                     # CPU, a few seconds, no downloads
+    make -C hardware test      # RTL regression, needs Icarus Verilog
+
+Issues and pull requests are welcome.
 
 ## Paper & citation
 
@@ -130,7 +147,7 @@ Preprint (arXiv): https://arxiv.org/abs/2609.04724
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+MIT; see [LICENSE](https://github.com/hplp/FlexPosit/blob/main/LICENSE).
 
 ## Contact
 

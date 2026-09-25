@@ -26,6 +26,27 @@ jobs:
       - name: Tests
         run: pytest -q
 
+  package:
+    # Build the wheel and use it from outside the checkout, as a `pip install flexposit` user would.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: |
+          pip install build twine
+          python -m build
+          twine check dist/*
+      - name: Install wheel and smoke-test
+        working-directory: ${{ runner.temp }}
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install "$GITHUB_WORKSPACE"/dist/*.whl
+          python -c "import flexposit; names = flexposit.shipped_sensitivity(); assert len(names) == 9, names; flexposit.api.read_sensitivity('phi-2'); print(flexposit.__version__, names)"
+          flexposit-mpq --help > /dev/null
+
   hardware:
     runs-on: ubuntu-latest
     steps:

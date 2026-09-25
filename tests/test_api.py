@@ -3,7 +3,7 @@ import pytest
 import torch
 
 import flexposit
-from flexposit.api import plan_windows
+from flexposit.api import plan_windows, read_sensitivity
 from flexposit.formats import posit_values
 from flexposit.utils import quantizable_layers, to_cout_first
 
@@ -103,3 +103,18 @@ def test_fp8_activation_hooks(tiny_llama):
     assert torch.isfinite(out).all()
     for h in handles:
         h.remove()
+
+
+def test_shipped_sensitivity_resolves_by_name():
+    names = flexposit.shipped_sensitivity()
+    assert {"gpt2-large", "phi-2", "llama-2-7b", "mistral-7b", "qwen2.5-14b"} <= set(names)
+    for name in names:
+        rows = read_sensitivity(name)
+        assert rows and all(ws < we for _, ws, we, _ in rows), name
+    path = flexposit.sensitivity_csv("phi-2")
+    assert flexposit.sensitivity_csv(path) == path
+
+
+def test_unknown_sensitivity_name():
+    with pytest.raises(FileNotFoundError, match="shipped models"):
+        flexposit.sensitivity_csv("no-such-model")
