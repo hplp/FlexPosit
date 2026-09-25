@@ -85,7 +85,7 @@ def get_args():
                    help="tile es candidates; smaller = lower peak memory")
 
     # scope
-    p.add_argument("--skip_lm_head", action="store_true", default=True,
+    p.add_argument("--skip_lm_head", action=argparse.BooleanOptionalAction, default=True,
                    help="skip tied/output head")
     p.add_argument("--quantize_embeddings", action="store_true", default=False,
                    help="include embeddings (usually False)")

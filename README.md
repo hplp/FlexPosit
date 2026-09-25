@@ -78,6 +78,7 @@ whose Posit precision (4–8 bits) changes per channel window at runtime.
 
 ```bash
 sudo apt install iverilog   # or on macOS: brew install icarus-verilog
+pip install numpy           # used by the Python reference model
 cd hardware && make test
 ```
 
