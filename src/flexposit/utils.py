@@ -16,6 +16,15 @@ DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
 _DTYPE_KW = "dtype" if tuple(int(v) for v in transformers.__version__.split(".")[:2]) >= (4, 56) else "torch_dtype"
 
 
+def default_device() -> str:
+    """"cuda" if an NVIDIA GPU is available, else "mps" on Apple silicon, else "cpu"."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def is_conv1d(mod: nn.Module) -> bool:
     """HF Conv1D (GPT-2 family) stores weights as (Cin, Cout)."""
     return isinstance(mod, Conv1D)
@@ -91,7 +100,7 @@ def load_model(name_or_path: str, dtype: str | torch.dtype = "fp16", device: str
         hf_id, **{_DTYPE_KW: torch_dtype}, trust_remote_code=trust, token=token,
         low_cpu_mem_usage=True)
     if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        device = default_device()
     model = model.to(device)
     tok = AutoTokenizer.from_pretrained(
         hf_id, use_fast=preset.get("use_fast_tokenizer", True), trust_remote_code=trust, token=token)

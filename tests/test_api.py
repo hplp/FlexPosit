@@ -118,3 +118,14 @@ def test_shipped_sensitivity_resolves_by_name():
 def test_unknown_sensitivity_name():
     with pytest.raises(FileNotFoundError, match="shipped models"):
         flexposit.sensitivity_csv("no-such-model")
+
+
+def test_default_device_prefers_cuda_then_mps(monkeypatch):
+    from flexposit.utils import default_device
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+    assert default_device() == "cpu"
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: True)
+    assert default_device() == "mps"
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert default_device() == "cuda"

@@ -8,9 +8,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import transformers
 
 from flexposit.eval import add_fp8_activation_quant, perplexity, wikitext2_ids
+from flexposit.utils import default_device
 
 transformers.logging.set_verbosity_error()
-DEV = "cuda" if torch.cuda.is_available() else "cpu"
+DEV = default_device()
 
 
 def main():

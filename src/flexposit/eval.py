@@ -16,7 +16,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from flexposit.formats import float_quantize
-from flexposit.utils import quantizable_layers
+from flexposit.utils import default_device, quantizable_layers
 
 FP8_E4M3_MAX = 240.0  # largest finite E4M3 value without NaN/Inf encodings (IEEE-style)
 
@@ -36,7 +36,7 @@ def model_device(model: nn.Module) -> torch.device:
     try:
         return next(p.device for p in model.parameters() if p.device.type != "meta")
     except StopIteration:
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        return torch.device(default_device())
 
 
 def max_seqlen(model: nn.Module, seqlen: int) -> int:
