@@ -16,19 +16,15 @@ import argparse, os, csv, json, math, time
 from typing import List, Tuple, Dict, Any
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import transformers
-import transformers.modeling_utils as modeling_utils
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from transformers.pytorch_utils import Conv1D
 
-from qtorch_plus.quant import posit_quantize
+from flexposit.formats import posit_quantize
 
 from flexposit.models import MODEL_PRESETS
+from flexposit.eval import perplexity, wikitext2_ids as encode_wikitext2_cpu
+from flexposit.utils import is_quant_linear, should_skip_layer
 
 transformers.logging.set_verbosity_error()
 EPS = 1e-8
@@ -101,22 +97,11 @@ def get_args():
         args.fp32_reference_dir = MODEL_PRESETS[args.model]["hf_id"]
     return args
 
-def get_torch_dtype(tag: str):
-    return torch.float16 if tag == "fp16" else torch.float32
 
-def is_quant_linear(mod):
-    if isinstance(mod, nn.Linear):
-        return True
-    if isinstance(mod, modeling_utils.Conv1D):  # GPT-2 attention/MLP use Conv1D, not Linear
-        return True
-    return False
 
-def should_skip_layer(name: str, mod: nn.Module, skip_lm_head: bool, quantize_embeddings: bool):
-    if skip_lm_head and (name == "lm_head" or name.endswith(".lm_head")):
-        return True
-    if isinstance(mod, nn.Embedding) and not quantize_embeddings:
-        return True
-    return False
+
+
+
 
 def read_sensitivity_windows(csv_path: str) -> List[Tuple[str, int, int, float, int]]:
     """
@@ -184,43 +169,10 @@ def quantize_window_cpu_from_fp32(fp32_w: torch.Tensor,
     out[start:end] = q_block
     return out.view_as(W)
 
-@torch.no_grad()
-def encode_wikitext2_cpu(tokenizer) -> torch.Tensor:
-    test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    enc = tokenizer("\n\n".join(test["text"]), return_tensors="pt", add_special_tokens=False)
-    return enc.input_ids
 
-@torch.no_grad()
+
 def eval_ppl_with_ids(model, ids_cpu: torch.Tensor, seqlen: int, use_fp16_fwd: bool) -> float:
-    model.eval()
-    nsamples = ids_cpu.numel() // seqlen
-    if nsamples == 0:
-        raise ValueError(f"Not enough tokens for seqlen={seqlen}")
-    try:
-        dev = next(p.device for p in model.parameters() if p.device.type != "meta")
-    except StopIteration:
-        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    if dev.type == "cuda":
-        autocast_ctx = torch.cuda.amp.autocast(enabled=use_fp16_fwd, dtype=torch.float16)
-    else:
-        class _NoOp:
-            def __enter__(self): return None
-            def __exit__(self, *a): return False
-        autocast_ctx = _NoOp()
-    nll_sum = 0.0
-    for i in range(nsamples):
-        batch = ids_cpu[:, i*seqlen:(i+1)*seqlen].to(dev)
-        with autocast_ctx:
-            logits = model(batch).logits
-        shift_logits = logits[:, :-1, :].contiguous().float()
-        shift_labels = batch[:, 1:].contiguous()
-        loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)),
-                               shift_labels.view(-1))
-        nll_sum += (loss.item() * seqlen)
-        if dev.type == "cuda":
-            del batch, logits, shift_logits, shift_labels, loss
-            torch.cuda.empty_cache()
-    return float(math.exp(nll_sum / (nsamples * seqlen)))
+    return perplexity(model, ids_cpu, seqlen, autocast_dtype=torch.float16 if use_fp16_fwd else None)
 
 def collect_quantizable_layers(model, skip_lm_head: bool, quantize_embeddings: bool) -> List[str]:
     names = []
@@ -258,7 +210,7 @@ def apply_windows_to_model(model,
         # Per-Cout orientation: HF Conv1D stores (Cin, Cout) — transpose both the
         # FP32 reference and the stored weight so window indices [ws:we] walk
         # along Cout for BOTH Conv1D and nn.Linear.
-        is_conv1d = isinstance(mod, modeling_utils.Conv1D)
+        is_conv1d = isinstance(mod, Conv1D)
         fp32_w_stored = ref_sd[key]
         base_w_stored_cpu = mod.weight.detach().float().cpu()
         if is_conv1d:
@@ -338,7 +290,7 @@ def main():
     args = get_args()
     os.makedirs(args.out_dir, exist_ok=True)
 
-    q_dtype = get_torch_dtype(args.dtype)
+    q_dtype = torch.float16 if args.dtype == "fp16" else torch.float32
     eval_fp16 = (args.eval_dtype == "fp16")
     device_map = None if args.device_map == "none" else "auto"
     sweep_scales = [2.0 ** k for k in range(args.log2_min, args.log2_max + 1)]
@@ -411,7 +363,7 @@ def main():
                                  layer_order_map=layer_order_map, rng=rng)
         total_cand = len(cand)
 
-        print(f"\n[PLAN: Sweep Mode]")
+        print("\n[PLAN: Sweep Mode]")
         print(f"  strategy={args.sweep_strategy}  seed={args.random_seed if args.sweep_strategy=='random' else '-'}")
         print(f"  sweep_bits: {targets[0]:.3f} → {targets[-1]:.3f}  step={args.sweep_bits_step}")
         print(f"  total_candidate_windows={total_cand} (of {total_windows_all} total unique windows)")
@@ -498,8 +450,11 @@ def main():
                       f"achieved={achieved_bits:.3f} bits  PPL={ppl:.4f}")
                 xs.append(achieved_bits); ys.append(ppl)
 
-        # Save figure
+        # Save figure (optional: pip install flexposit[plot])
         try:
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
             fig_path = os.path.join(args.out_dir, "ppl_vs_avg_bits.png")
             plt.figure()
             plt.plot(xs, ys, marker="o")
@@ -789,12 +744,6 @@ def main():
         total_windows = len({(ly, ws, we) for (ly, ws, we, _dp, _cw) in sens_rows})
         achieved_avg_bits = args.base_bits + (min(windows_upgraded, total_windows) / total_windows) * (args.upgrade_bits - args.base_bits)
 
-        plot_path = os.path.join(args.out_dir, "ppl_vs_channels.png")
-        try:
-            # (optional) could log during loop as well
-            pass
-        except Exception:
-            pass
 
         print("\n[RESULT: PPL Goal Mode]")
         print(f"  ppl_goal={args.ppl_goal:.4f}, final_ppl={ppl:.4f}, time={elapsed/60:.1f} min")

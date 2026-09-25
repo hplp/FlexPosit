@@ -4,14 +4,14 @@
 #
 # Per-channel range scaling: scale = qmax / max(|w_row|), qmax=7 for signed INT4.
 
-import argparse, json, math, os
+import argparse, json, os
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import transformers
-import transformers.modeling_utils as modeling_utils
+from transformers.pytorch_utils import Conv1D
+
+from flexposit.eval import perplexity, wikitext2_ids
+from flexposit.utils import is_quant_linear, should_skip_layer
 
 transformers.logging.set_verbosity_error()
 
@@ -20,11 +20,11 @@ EPS = 1e-12
 
 
 def is_lin(m):
-    return isinstance(m, (nn.Linear, modeling_utils.Conv1D))
+    return is_quant_linear(m)
 
 
 def skip(name, m):
-    return (name == "lm_head" or name.endswith(".lm_head") or isinstance(m, nn.Embedding))
+    return should_skip_layer(name, m)
 
 
 @torch.no_grad()
@@ -45,24 +45,9 @@ def int4_per_channel_range(W: torch.Tensor, nbits: int = 4, is_conv1d: bool = Fa
     return q.to(dtype=dtype, device=dev)
 
 
-@torch.no_grad()
 def eval_wikitext2_ppl(model, tok, seqlen, forward_dtype):
-    model.eval()
-    test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    ids = tok("\n\n".join(test["text"]), return_tensors="pt", add_special_tokens=False).input_ids
-    n = ids.numel() // seqlen
-    dev = next(model.parameters()).device
-    nll = 0.0
-    dt = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[forward_dtype]
-    with torch.cuda.amp.autocast(enabled=(forward_dtype != "fp32"), dtype=dt):
-        for i in range(n):
-            b = ids[:, i*seqlen:(i+1)*seqlen].to(dev)
-            logits = model(b).logits
-            sl = logits[:, :-1, :].contiguous().float()
-            lab = b[:, 1:].contiguous()
-            loss = F.cross_entropy(sl.view(-1, sl.size(-1)), lab.view(-1))
-            nll += loss.item() * seqlen
-    return math.exp(nll / (n * seqlen))
+    amp = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": None}[forward_dtype]
+    return perplexity(model, wikitext2_ids(tok), seqlen, autocast_dtype=amp)
 
 
 def main():
@@ -91,7 +76,7 @@ def main():
             continue
         mod.weight.data = int4_per_channel_range(
             mod.weight.data,
-            is_conv1d=isinstance(mod, modeling_utils.Conv1D),
+            is_conv1d=isinstance(mod, Conv1D),
         )
         n_quantized += 1
     print(f"[Quantize] INT4 (per-output-channel range) on {n_quantized} Linear/Conv1D layers", flush=True)

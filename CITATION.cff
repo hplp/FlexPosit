@@ -1,0 +1,35 @@
+cff-version: 1.2.0
+message: "If you use FlexPosit, please cite our paper."
+title: "FlexPosit"
+type: software
+license: MIT
+repository-code: "https://github.com/hplp/FlexPosit"
+authors:
+  - family-names: Gao
+    given-names: Yimin
+  - family-names: Dai
+    given-names: Liangtao
+  - family-names: Yin
+    given-names: Jun
+  - family-names: Guo
+    given-names: Xinfei
+  - family-names: Stan
+    given-names: Mircea
+preferred-citation:
+  type: article
+  title: "FlexPosit: Tunable Fractional Precision for LLM Inference Accelerators"
+  authors:
+    - family-names: Gao
+      given-names: Yimin
+    - family-names: Dai
+      given-names: Liangtao
+    - family-names: Yin
+      given-names: Jun
+    - family-names: Guo
+      given-names: Xinfei
+    - family-names: Stan
+      given-names: Mircea
+  journal: "arXiv preprint arXiv:2609.04724"
+  year: 2026
+  doi: "10.48550/arXiv.2609.04724"
+  url: "https://arxiv.org/abs/2609.04724"

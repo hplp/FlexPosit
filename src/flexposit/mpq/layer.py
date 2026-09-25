@@ -34,25 +34,25 @@ Output files in --out_dir:
   ppl_vs_avg_bits.csv     (step, target, achieved, regions_upgraded, weights_upgraded, ppl)
   run_log.json            (config + base_ppl + ranked region order + selected regions per target)
 """
-import argparse, csv, gc, json, math, os, re, time
+import argparse, csv, gc, json, os, re, time
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 import transformers
-import transformers.modeling_utils as modeling_utils
+from transformers.pytorch_utils import Conv1D
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from qtorch_plus.quant import posit_quantize
+from flexposit.formats import posit_quantize
 from datasets import load_dataset
 
 from flexposit.models import MODEL_PRESETS
+from flexposit.eval import WIKITEXT2, perplexity, wikitext2_ids
+from flexposit.utils import is_quant_linear
 
 transformers.logging.set_verbosity_error()
 EPS = 1e-8
 LAYER_RE = re.compile(r"^(.*?\.(?:h|layers)\.\d+)\.")
 
 
-def is_quant_linear(mod):
-    return isinstance(mod, nn.Linear) or isinstance(mod, modeling_utils.Conv1D)
+
 
 
 def layer_of(name):
@@ -104,30 +104,9 @@ def quantize_pc_posit(W_fp, nsize, es=1, log2_min=-8, log2_max=9, device="cuda",
     return out.detach().cpu()
 
 
-@torch.no_grad()
 def eval_wikitext_ppl(model, tok, seqlen, use_fp16=True):
-    test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    enc = tok("\n\n".join(test["text"]), return_tensors="pt", add_special_tokens=False)
-    ids = enc.input_ids
-    n = ids.numel() // seqlen
-    dev = next(p.device for p in model.parameters() if p.device.type != "meta")
-    model.eval()
-    nll = 0.0
-    ctx = (
-        torch.cuda.amp.autocast(enabled=True, dtype=torch.float16)
-        if use_fp16 and dev.type == "cuda"
-        else torch.cuda.amp.autocast(enabled=False)
-    )
-    with ctx:
-        for i in range(n):
-            batch = ids[:, i * seqlen : (i + 1) * seqlen].to(dev)
-            logits = model(batch).logits
-            sl = logits[:, :-1, :].contiguous().float()
-            lab = batch[:, 1:].contiguous()
-            loss = F.cross_entropy(sl.view(-1, sl.size(-1)), lab.view(-1))
-            nll += loss.item() * seqlen
-            del batch, logits, sl, lab, loss
-    return math.exp(nll / (n * seqlen))
+    return perplexity(model, wikitext2_ids(tok), seqlen,
+                      autocast_dtype=torch.float16 if use_fp16 else None)
 
 
 def collect_region_layout(model, granularity):
@@ -167,7 +146,7 @@ def collect_region_layout(model, granularity):
 
 
 def calib_chunks(tok, seqlen, n_samples, split="train"):
-    ds = load_dataset("wikitext", "wikitext-2-raw-v1", split=split)
+    ds = load_dataset(*WIKITEXT2, split=split)
     enc = tok("\n\n".join(ds["text"]), return_tensors="pt", add_special_tokens=False)
     ids = enc.input_ids
     take = min(n_samples, ids.numel() // seqlen)
@@ -258,7 +237,7 @@ def ppl_probe_sensitivity_per_region(
                 continue
             wq = quantize_pc_posit(
                 ref_sd[wkey].float(), nsize=b_high, es=es, device=m.weight.device,
-                is_conv1d=isinstance(m, modeling_utils.Conv1D),
+                is_conv1d=isinstance(m, Conv1D),
             )
             m.weight.data = wq.to(m.weight.dtype).to(m.weight.device)
         ppl = eval_wikitext_ppl(model_q, tok, seqlen, use_fp16=use_fp16)
@@ -336,7 +315,7 @@ def main():
         # Capture which layers are HF Conv1D so per-Cout orientation can be
         # preserved after model_fp is freed (needed for the Fisher path).
         conv1d_names = {n for n, m in model_fp.named_modules()
-                        if isinstance(m, modeling_utils.Conv1D)}
+                        if isinstance(m, Conv1D)}
 
         # Free FP model BEFORE the SQNR-search inner buffer is allocated, otherwise
         # the residual activations + grad-checkpointing buffers OOM on 7B + A100-40GB.
@@ -467,7 +446,7 @@ def main():
                     wq = quantize_pc_posit(
                         ref_sd[wkey].float(), nsize=args.b_high, es=args.es,
                         device=m.weight.device,
-                        is_conv1d=isinstance(m, modeling_utils.Conv1D),
+                        is_conv1d=isinstance(m, Conv1D),
                     )
                     m.weight.data = wq.to(m.weight.dtype).to(m.weight.device)
                 upgraded.append(nxt)

@@ -8,7 +8,7 @@
 # Two backends, auto-selected at runtime:
 #   [A] microsoft/microxcaling (`mx`) — canonical OCP MX impl. Preferred if importable.
 #         quantize_mx_op(W, specs, elem_format='fp8_e4m3', axes=[-1], block_size=32)
-#   [B] qtorch_plus fallback — block-wise E4M3 with corrected format max.
+#   [B] qtorch_plus-compatible fallback (flexposit.formats) — block-wise E4M3 with corrected format max.
 #         A sanity test on float_quantize(exp=4,man=3) decides the E4M3 max convention:
 #           max ~240  -> IEEE  -> MXFP8_MAX=240, emax_elem=7
 #           max ~448  -> OCP   -> MXFP8_MAX=448, emax_elem=8
@@ -19,11 +19,11 @@
 
 import argparse, math, gc, torch
 import torch.nn.functional as F
-import torch.nn as nn
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import transformers
-import transformers.modeling_utils as modeling_utils
+
+from flexposit.eval import perplexity, wikitext2_ids
+from flexposit.utils import is_quant_linear, should_skip_layer
 
 transformers.logging.set_verbosity_error()
 
@@ -82,10 +82,10 @@ def init_backend():
         print("[backend] microxcaling (mx): fp8_e4m3, block_size=32, axes=[-1], custom_cuda=False", flush=True)
         return
     except Exception as e:
-        print(f"[backend] microxcaling unavailable ({type(e).__name__}: {e}); falling back to qtorch_plus", flush=True)
+        print(f"[backend] microxcaling unavailable ({type(e).__name__}: {e}); falling back to flexposit.formats (qtorch_plus-compatible)", flush=True)
 
     # ---- qtorch_plus fallback: decide E4M3 max convention ----
-    from qtorch_plus.quant import float_quantize
+    from flexposit.formats import float_quantize
     x = torch.tensor([100., 200., 240., 245., 300., 400., 500., 1000.], device=DEV)
     out = float_quantize(x, exp=4, man=3, rounding="nearest")
     mx_out = float(out.max().item())
@@ -107,7 +107,7 @@ def pg_quant(W):
         return _MX_QUANT(W)
 
     # qtorch fallback
-    from qtorch_plus.quant import float_quantize
+    from flexposit.formats import float_quantize
     out_f, in_f = W.shape
     flat = W.detach().float()
     pad = (GROUP - in_f % GROUP) % GROUP
@@ -125,31 +125,15 @@ def pg_quant(W):
 
 
 def is_lin(m):
-    return isinstance(m, (nn.Linear, modeling_utils.Conv1D))
+    return is_quant_linear(m)
 
 
 def skip(name, m):
-    return (name == "lm_head" or name.endswith(".lm_head")
-            or isinstance(m, nn.Embedding))
+    return should_skip_layer(name, m)
 
 
-@torch.no_grad()
 def ppl_wikitext(model, tok, seqlen, fwd_dtype):
-    model.eval()
-    test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    ids = tok("\n\n".join(test["text"]), return_tensors="pt", add_special_tokens=False).input_ids
-    n = ids.numel() // seqlen
-    dev = next(model.parameters()).device
-    nll = 0.0
-    with torch.cuda.amp.autocast(enabled=True, dtype=fwd_dtype):
-        for i in range(n):
-            b = ids[:, i*seqlen:(i+1)*seqlen].to(dev)
-            logits = model(b).logits
-            sl = logits[:, :-1, :].contiguous().float()
-            lab = b[:, 1:].contiguous()
-            loss = F.cross_entropy(sl.view(-1, sl.size(-1)), lab.view(-1))
-            nll += loss.item() * seqlen
-    return math.exp(nll / (n * seqlen))
+    return perplexity(model, wikitext2_ids(tok), seqlen, autocast_dtype=fwd_dtype)
 
 
 def run_one(short, hf_id, seqlen, trust, use_fast, dtype):

@@ -20,18 +20,15 @@ Two ways to specify the window layout:
 The `delta_ppl` column of the output CSV is `-score(window)` so ASCENDING
 sort (which the MPQ apply script uses) picks the highest-Fisher windows first.
 """
-import argparse, csv, gc, math, os, sys, time
+import argparse, csv, gc, os, time
 from collections import defaultdict
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import transformers
-import transformers.modeling_utils as modeling_utils
+from transformers.pytorch_utils import Conv1D
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 # Reuse Fisher helpers from the layer-MPQ driver.
 from flexposit.mpq.layer import (
-    is_quant_linear, calib_chunks, compute_fisher_diagonal,
+    is_quant_linear, compute_fisher_diagonal,
     quantize_pc_posit,
 )
 from flexposit.models import MODEL_PRESETS
@@ -63,7 +60,7 @@ def enumerate_windows(model, channel_window, override_nsize, skip_lm_head=True):
     windows = []
     n_conv1d_skipped = 0
     for name, mod in model.named_modules():
-        if isinstance(mod, modeling_utils.Conv1D):
+        if isinstance(mod, Conv1D):
             n_conv1d_skipped += 1
             continue
         if not is_quant_linear(mod):
@@ -170,7 +167,7 @@ def main():
     torch.cuda.empty_cache()
 
     # ---- Per-window Fisher score aggregation -----------------------------
-    print(f"[Score] aggregating per-window Fisher · Δw² ...", flush=True)
+    print("[Score] aggregating per-window Fisher · Δw² ...", flush=True)
     t0 = time.time()
     out_rows = []
     for li, layer_key in enumerate(sorted(by_layer.keys())):

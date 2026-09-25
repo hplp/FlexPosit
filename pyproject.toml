@@ -4,14 +4,60 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flexposit"
-version = "0.1.0"
-description = "FlexPosit: mixed-precision Posit quantization framework for LLMs."
+version = "0.2.0"
+description = "FlexPosit: mixed-precision Posit quantization for LLMs, with matching accelerator RTL."
 readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Yimin Gao", email = "yg9bq@virginia.edu" }]
 requires-python = ">=3.10"
-# Runtime dependencies are pinned in requirements.txt for behavioral equivalence
-# with the MICRO 2026 AE artifact. Install via:  bash install.sh
-dependencies = []
+keywords = ["posit", "quantization", "llm", "mixed-precision", "accelerator", "hardware"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+# Minimal runtime requirements. requirements.txt pins the exact versions used
+# for the MICRO 2026 results.
+dependencies = [
+    "torch>=2.1",
+    "transformers>=4.40",
+    "accelerate",
+    "datasets",
+    "safetensors",
+    "numpy",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+eval = ["lm-eval>=0.4"]
+plot = ["matplotlib"]
+# qtorch_plus is only needed to cross-check flexposit.formats (FLEXPOSIT_BACKEND=qtorch).
+qtorch = ["qtorch_plus==0.2.0", "ninja"]
+dev = ["pytest", "ruff"]
+
+[project.urls]
+Homepage = "https://github.com/hplp/FlexPosit"
+Paper = "https://arxiv.org/abs/2609.04724"
+Artifact = "https://github.com/hplp/FlexPosit_artifact"
+
+[project.scripts]
+flexposit-quantize = "flexposit.quantizers.posit:main"
+flexposit-mpq = "flexposit.mpq.channel_window:main"
+flexposit-ppl = "flexposit.ppl:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["flexposit*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_smoke_imports.py" = ["F401"]

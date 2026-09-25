@@ -1,49 +1,94 @@
 # FlexPosit: Tunable Fractional Precision for LLM Inference Accelerators (MICRO 2026)
 
+[![tests](https://github.com/hplp/FlexPosit/actions/workflows/ci.yml/badge.svg)](https://github.com/hplp/FlexPosit/actions/workflows/ci.yml)
+
+FlexPosit received all three MICRO 2026 artifact badges. To reproduce the
+paper's results exactly, use
+[FlexPosit_artifact](https://github.com/hplp/FlexPosit_artifact).
+
 <p align="center">
   <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/artifacts_available_v1_1.png" height="100" alt="Artifacts Available"></a>
   <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/artifacts_evaluated_functional_v1_1.png" height="100" alt="Artifacts Evaluated — Functional"></a>
   <a href="https://github.com/hplp/FlexPosit_artifact"><img src="assets/results_reproduced_v1_1.png" height="100" alt="Results Reproduced"></a>
 </p>
 
-FlexPosit received all three MICRO 2026 artifact badges:
-**Artifacts Available**, **Artifacts Evaluated — Functional**, and **Results Reproduced**.
+FlexPosit is a Posit-based mixed-precision quantization framework for LLMs.
+It allocates higher precision to the channel windows whose quantization most
+affects perplexity. The paper tunes precision by combining Posit(4,1) and
+Posit(5,1) across channel windows; other Posit formats can be selected through
+the configuration.
+This repo contains:
 
-For exact paper reproduction (Tables 2-6, Figs 11-12, Table 10), use the
-MICRO 2026 artifact: https://github.com/hplp/FlexPosit_artifact
-
-This repo is the FlexPosit mixed-precision quantization framework.
+- **`flexposit`**, a Python package for quantizing HuggingFace models with
+  FlexPosit.
+- **[`hardware/`](hardware/)**, the RTL of the FlexPosit datapath, part of the
+  test-chip version of FlexPosit in an ongoing 12 nm tapeout shuttle.
 
 ## Install
 
-    bash install.sh                    # creates conda env `flexposit`
-    conda activate flexposit
+```bash
+pip install -e .            # Python >= 3.10; includes WikiText-2 perplexity
+pip install -e ".[eval]"    # optional: adds lm-evaluation-harness for downstream tasks (ARC, HellaSwag, ...)
+```
 
-Prerequisites: `conda` on PATH, an NVIDIA driver compatible with CUDA 11.8,
-and a CUDA toolkit with `nvcc >= 11.8` on PATH (any 11.8+ works, including
-CUDA 12.x). The toolkit is required because `qtorch_plus` JIT-compiles a
-CUDA extension on first import — the torch wheel alone (which only ships
-the runtime) is not sufficient. If your default `nvcc` is too old (e.g.
-`/usr/bin/nvcc` at 11.5), point PATH at a newer install first:
+## Quick start
 
-    export CUDA_HOME=/usr/local/cuda-11.8
-    export PATH="$CUDA_HOME/bin:$PATH"
-    export LD_LIBRARY_PATH="$CUDA_HOME/lib64:$LD_LIBRARY_PATH"
-    bash install.sh
+Use the Python API to quantize a model from your own code: load it, quantize it
+to a target average bit width, then evaluate or save it. For example, Mistral-7B
+at 4.4 bits:
 
-## Test
+```python
+import flexposit
 
-    pytest tests/
+model, tok = flexposit.load_model("mistral-7b")          # preset name, HF id or local path
 
-Six tests: package smoke-imports and a Conv1D-axis regression on
-`_to_cout_first` / `_from_cout_first` in `flexposit.quantizers.posit`.
-Takes ~20s once the `qtorch_plus` CUDA extension has JIT-compiled.
+# 4.4 bits on average, using the shipped sensitivity ranking
+# (uniform Posit(4,1) is bits=4.0 and needs no sensitivity)
+state = flexposit.quantize(model, flexposit.FlexPositConfig(bits=4.4),
+                           sensitivity="data/sensitivity/mistral-7b.csv")
+
+print(flexposit.wikitext2_perplexity(model, tok))        # WikiText-2, seqlen 2048
+flexposit.eval.lm_eval(model, tok, ["arc_easy"])         # any lm-eval task
+flexposit.save(model, tok, state, "out/mistral-7b-flexposit-4.4")
+```
+
+`quantize` rounds each weight to its channel's Posit format in place, so the
+model runs anywhere a HuggingFace model runs; `state` records each channel's
+Posit size and scale. To sweep many bit widths, use the command line below.
+
+## Command line
+
+The scripts run the paper's workflow from the shell: quantize every weight to
+Posit(4,1), then sweep the average bit width from 4.0 to 5.0 and record
+WikiText-2 perplexity at each step. Results go to `out/`.
+
+    bash scripts/01_quantize_base.sh phi-2   # quantize weights to Posit(4,1)
+    bash scripts/02_mpq_sweep.sh    phi-2    # mixed-precision sweep over 4.0–5.0 bits
+
+The shipped sensitivity CSVs hold the PPL-based sensitivity used in the paper.
+You can also profile your own, with a different configuration (e.g. the
+channel-window size, i.e. the granularity) or a different method (a Fisher-based
+one is provided). See [docs/cli.md](docs/cli.md) for these options and
+the tests.
+
+## Hardware
+
+[`hardware/`](hardware/) holds the RTL of a bit-serial FlexPosit accelerator
+whose Posit precision (4–8 bits) changes per channel window at runtime.
+
+```bash
+sudo apt install iverilog   # or on macOS: brew install icarus-verilog
+cd hardware && make test
+```
+
+`make test` (about a minute) simulates the RTL and checks it bit for bit against
+a Python model: every FP8 × Posit product on a single PE, then random matrix
+tiles through the whole array.
 
 ## Supported models
 
-Every CLI takes `--model <short_name>` and looks up the HuggingFace id itself
-(see `src/flexposit/models.py`). Each has a pre-computed sensitivity CSV in
-`data/sensitivity/`.
+Each has a pre-computed sensitivity CSV in `data/sensitivity/`; the CLIs and
+the Python API accept the short names.
 
 | Short name        | HuggingFace id                       |
 | ----------------- | ------------------------------------ |
@@ -57,116 +102,14 @@ Every CLI takes `--model <short_name>` and looks up the HuggingFace id itself
 | `qwen2.5-7b`      | `Qwen/Qwen2.5-7B`                    |
 | `qwen2.5-14b`     | `Qwen/Qwen2.5-14B`                   |
 
-## End-to-end flow
-
-Two scripts do the work:
-
-    bash scripts/01_quantize_base.sh phi-2   # quantize weights to Posit base
-    bash scripts/02_mpq_sweep.sh    phi-2    # MPQ sweep, using the shipped PPL sensitivity CSV
-
-Outputs land in `out/`. Common overrides:
-
-    NSIZE=5 bash scripts/01_quantize_base.sh phi-2                        # Posit(5,1)
-    MPQ_ARGS="--target_avg_bits 4.7" bash scripts/02_mpq_sweep.sh phi-2   # single target
-
-## End-to-end flow (Fisher variant)
-
-Fisher is a faster proxy for the PPL-probe sensitivity and runs on the FP
-reference model directly — no `01_quantize_base.sh` dependency:
-
-    bash scripts/regen_sensitivity_fisher.sh phi-2   # regen sensitivity CSV via Fisher
-    bash scripts/01_quantize_base.sh         phi-2   # quantize weights to Posit base
-    SENS_CSV=out/fisher_phi-2.csv \
-        bash scripts/02_mpq_sweep.sh phi-2           # MPQ sweep, using the Fisher CSV
-
-The first two are independent — run them in parallel to save wallclock.
-
-## Regenerating sensitivity (optional)
-
-We ship a PPL-probe CSV per supported model in `data/sensitivity/`.
-Regenerate only if you want a new model, a different channel-window, or a
-different method. Both regenerators write the same schema; plug the result
-into `02_mpq_sweep.sh` via `SENS_CSV=...`.
-
-- **PPL-probe** (canonical, slower). Needs the base checkpoint from
-  `01_quantize_base.sh`; auto-dispatches to the Conv1D-aware variant for GPT-2.
-
-      bash scripts/regen_sensitivity_ppl.sh phi-2   # -> out/sens_phi-2/sensitivity.csv
-
-- **Fisher** (faster proxy). No `01_quantize_base.sh` dependency. See the
-  Fisher-variant end-to-end flow above.
-
 ## Layout
 
-    src/flexposit/         # importable package
-    ├── models.py          # MODEL_PRESETS: short-name -> HF id + load flags
-    ├── ppl.py             # WikiText-2 PPL harness
-    ├── quantizers/        # base Posit + comparison baselines (int4, mxfp8)
-    ├── mpq/               # mixed-precision drivers (channel_window, layer)
-    └── sensitivity/       # sensitivity CSV generators (ppl_probe,
-                           #   ppl_probe_conv1d, fisher)
-
-    data/sensitivity/      # nine pre-computed sensitivity CSVs (one per model
-                           #   at the channel-window used in the paper)
-
-    scripts/               # bash wrappers around the CLIs
-    ├── _env.sh                          # sourced: activate conda, ensure CUDA
-    ├── 01_quantize_base.sh              # -> flexposit.quantizers.posit
-    ├── 02_mpq_sweep.sh                  # -> flexposit.mpq.channel_window
-    ├── regen_sensitivity_ppl.sh         # -> flexposit.sensitivity.ppl_probe[_conv1d]
-    └── regen_sensitivity_fisher.sh      # -> flexposit.sensitivity.fisher
-
-## Parameter tuning
-
-The scripts pass through env vars and `MPQ_ARGS` to the underlying CLIs. Every
-python module also takes `--help` for the full list. Common tweaks below —
-this repo is the framework, so mix and match freely; for locked, exact-paper
-reproduction use `FlexPosit_artifact` instead.
-
-**Precision target modes**
-
-    # single target avg bits (budget mode)
-    MPQ_ARGS="--target_avg_bits 4.5" bash scripts/02_mpq_sweep.sh phi-2
-
-    # full Pareto sweep, writes ppl_vs_avg_bits.csv
-    MPQ_ARGS="--sweep_bits_start 4.0 --sweep_bits_end 5.0 --sweep_bits_step 0.1" \
-        bash scripts/02_mpq_sweep.sh phi-2
-
-    # PPL goal instead of bit budget — upgrade greedily until PPL <= target
-    MPQ_ARGS="--ppl_goal 12.5" bash scripts/02_mpq_sweep.sh phi-2
-
-**Base Posit precision**
-
-    NSIZE=5 bash scripts/01_quantize_base.sh phi-2                        # Posit(5,1) base
-
-**Sensitivity strategy (ablations)**
-
-    # random window ordering, seeded — for random-baseline comparisons
-    MPQ_ARGS="--sweep_bits_start 4.0 --sweep_bits_end 5.0 \
-              --sweep_strategy random --random_seed 42" \
-        bash scripts/02_mpq_sweep.sh phi-2
-
-    # location-based (deterministic by layer index)
-    MPQ_ARGS="--sweep_bits_start 4.0 --sweep_bits_end 5.0 --sweep_strategy location" \
-        bash scripts/02_mpq_sweep.sh phi-2
-
-**Channel-window granularity** (when regenerating sensitivity)
-
-    CHANNEL_WINDOW=128 bash scripts/regen_sensitivity_fisher.sh phi-2      # finer
-    CHANNEL_WINDOW=512 bash scripts/regen_sensitivity_fisher.sh phi-2      # coarser
-
-**Downgrade mode** (fewer iterations when target > (base+upgrade)/2)
-
-    # start from Posit(5,1) base, downgrade least-sensitive windows to Posit(4,1)
-    NSIZE=5 bash scripts/01_quantize_base.sh phi-2
-    MPQ_ARGS="--target_avg_bits 4.9 --downgrade" bash scripts/02_mpq_sweep.sh phi-2
-
-**Activation quantization** (FP8-E4M3 per-token dynamic, on top of weight-quant)
-
-    python -m flexposit.ppl --model out/mpq_phi-2_t4.5 --act_quant fp8_e4m3
-
-Full CLI reference: `python -m flexposit.mpq.channel_window --help` and
-`python -m flexposit.quantizers.posit --help`.
+    src/flexposit/       Python package (API, quantizers, mixed precision, sensitivity)
+    scripts/             shell wrappers for the command-line workflow
+    data/sensitivity/    sensitivity CSVs for the supported models
+    hardware/            RTL, testbenches and bit-exact model
+    docs/cli.md          command-line guide
+    tests/               test suite
 
 ## Paper & citation
 
@@ -183,6 +126,10 @@ Preprint (arXiv): https://arxiv.org/abs/2609.04724
   doi           = {10.48550/arXiv.2609.04724}
 }
 ```
+
+## License
+
+MIT; see [LICENSE](LICENSE).
 
 ## Contact
 

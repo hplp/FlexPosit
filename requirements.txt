@@ -1,14 +1,8 @@
-# FlexPosit — pinned Python deps
-# Install order matters: torch first, then qtorch_plus (compiles against torch),
-# then everything else.
+# FlexPosit — exact versions behind the MICRO 2026 results.
+# `pip install flexposit` (pyproject.toml) only sets minimum versions.
+# install.sh installs torch first from the CUDA 11.8 (or CPU) index.
 
-# Torch stack — CUDA 11.8 build
 torch==2.4.1
-torchvision==0.19.1
-torchaudio==2.4.1
-
-# Posit quantization backend
-qtorch_plus==0.2.0
 
 # Transformer models
 transformers==4.45.2
@@ -24,9 +18,6 @@ datasets==3.0.2
 # Scientific stack
 numpy<2.0
 scipy==1.15.3
-
-# Build tools (needed by qtorch_plus JIT compile of C++/CUDA extensions)
-ninja
 
 # Utilities
 tqdm

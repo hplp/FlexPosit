@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-# posit.py — base per-channel Posit quantizer
-# Fixed-nsize per-layer; per-channel search for (scale, es).
-# GPU-friendly: batched per-channel search (no float(tensor) syncs inside loops).
-# Saves model + log + metrics.json (chunked non-overlapping PPL).
+# posit.py — base per-channel Posit quantizer (CLI).
+# Every Linear/Conv1D weight is quantized to Posit(nsize, es) with a per-output-
+# channel power-of-two scale chosen for best SQNR (flexposit.core).
+# Saves model + quant_log.json + metrics.json (chunked non-overlapping PPL).
 
-import argparse, json, os, math, random
-import numpy as np
+import argparse, json, math, os
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 from tqdm import tqdm
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import transformers
-import transformers.modeling_utils as modeling_utils
 
-from qtorch_plus.quant import posit_quantize, float_quantize
-
+from flexposit.core import search_channels
+from flexposit.eval import perplexity, wikitext2_ids
+from flexposit.formats import float_quantize
 from flexposit.models import MODEL_PRESETS
+from flexposit.utils import DTYPES, from_cout_first, quantizable_layers, to_cout_first
 
 transformers.logging.set_verbosity_error()
-EPS = 1e-8
+
+# Kept for tests and external callers of the pre-refactor names.
+_to_cout_first = to_cout_first
+_from_cout_first = from_cout_first
+
 
 def get_args():
     p = argparse.ArgumentParser()
@@ -31,7 +33,7 @@ def get_args():
     # HF token (for gated models); can also use env HF_TOKEN
     p.add_argument("--hf_token", default=None)
 
-    # fixed nsize (per layer), per-channel search for (scale, es)
+    # fixed nsize (per layer), per-channel search for the power-of-two scale
     p.add_argument("--nsize", type=int, default=4)
     p.add_argument(
         "--weight_format",
@@ -40,21 +42,23 @@ def get_args():
         help="Weight format alias (posit4 → nsize=4, posit5 → nsize=5). "
              "Optional — if omitted, derived from --nsize."
     )
-    p.add_argument("--es_candidates", type=int, nargs="+", default=[1])
+    p.add_argument("--es_candidates", type=int, nargs="+", default=[1],
+                   help="Posit es. The paper fixes es=1; several values search es per channel.")
     p.add_argument("--log2_min", type=int, default=-8)
     p.add_argument("--log2_max", type=int, default=9)
 
-    # GPU batching for per-channel search (important!)
+    # batching for the per-channel search
     p.add_argument("--ch_batch", type=int, default=64,
                    help="How many output channels to search at once per layer. Increase if you have headroom.")
 
-    # activation quant (optional; off by default)
+    # activation quant (optional; off by default). Per-element, no scaling;
+    # flexposit.ppl --act_quant fp8_e4m3 is the per-token variant used in the paper.
     p.add_argument("--use_act_quant", action="store_true", default=False)
     p.add_argument("--act_exp", type=int, default=4)
     p.add_argument("--act_man", type=int, default=3)
 
     # quantization scope
-    p.add_argument("--skip_lm_head", action="store_true", default=True)
+    p.add_argument("--skip_lm_head", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--quantize_embeddings", action="store_true", default=False)
 
     # Chunked non-overlapping WikiText-2 PPL
@@ -65,70 +69,16 @@ def get_args():
     p.add_argument("--save_log_name", default="quant_log.json")
     return p.parse_args()
 
-def get_torch_dtype(tag: str):
-    if tag == "fp16":
-        return torch.float16
-    if tag == "bf16":
-        return torch.bfloat16
-    return torch.float32
 
-def make_act_hook(use_act: bool, exp_bits: int, man_bits: int):
-    if not use_act:
-        def passthrough(_m, inputs): return inputs
-        return passthrough
-
-    def linear_activation(x: torch.Tensor):
-        x_fp32 = x.float()  # float_quantize requires fp32 input
-        q_fp32 = float_quantize(x_fp32, exp=exp_bits, man=man_bits, rounding="nearest")
-        return q_fp32.to(x.dtype)  # cast back to module's operating dtype
-
+def make_act_hook(exp_bits: int, man_bits: int):
     def hook(_m, inputs):
-        return (linear_activation(inputs[0]),)
-
+        x = inputs[0]
+        return (float_quantize(x.float(), exp=exp_bits, man=man_bits).to(x.dtype),)
     return hook
 
-def is_quant_linear(mod: nn.Module):
-    if isinstance(mod, nn.Linear):
-        return True
-    if isinstance(mod, modeling_utils.Conv1D):
-        return True
-    name = mod.__class__.__name__.lower()
-    if "linear" in name and hasattr(mod, "weight") and isinstance(getattr(mod, "weight"), torch.Tensor):
-        return True
-    return False
-
-
-def _to_cout_first(mod: nn.Module, W: torch.Tensor) -> torch.Tensor:
-    """Return W arranged so dim 0 is Cout.
-
-    nn.Linear stores (Cout, Cin) — passed through.
-    HF Conv1D stores (Cin, Cout) — transposed so per-row iteration is per-Cout.
-    """
-    if isinstance(mod, modeling_utils.Conv1D):
-        return W.transpose(0, 1).contiguous()
-    return W
-
-
-def _from_cout_first(mod: nn.Module, q_w: torch.Tensor) -> torch.Tensor:
-    """Undo _to_cout_first: transpose back to storage layout for Conv1D."""
-    if isinstance(mod, modeling_utils.Conv1D):
-        return q_w.transpose(0, 1).contiguous()
-    return q_w
-
-def should_skip_layer(name: str, mod: nn.Module, skip_lm_head: bool, quantize_embeddings: bool):
-    if skip_lm_head and (name == "lm_head" or name.endswith(".lm_head")):
-        return True
-    if isinstance(mod, nn.Embedding) and not quantize_embeddings:
-        return True
-    return False
 
 def summarize_format_usage(ch_meta):
-    """
-    Summarize per-channel selected format statistics.
-    Supports:
-      - mixed meta: {"selected_format": "..."}
-      - single-format meta: {"format": "..."}
-    """
+    """Per-channel format counts and ratios for a list of channel dicts."""
     total = len(ch_meta)
     counts = {}
     for item in ch_meta:
@@ -137,187 +87,25 @@ def summarize_format_usage(ch_meta):
     ratios = {k: (v / total if total > 0 else 0.0) for k, v in counts.items()}
     return {"total_channels": total, "counts": counts, "ratios": ratios}
 
-@torch.no_grad()
-def _per_channel_sqnr_search_batched(
-    flat: torch.Tensor,
-    nsize: int,
-    es_cands,
-    sweep_scales,
-    ch_batch: int,
-    return_quantized: bool,
-):
-    """
-    flat: [Cout, K] fp32 on device.
-    If return_quantized: returns (q_out [Cout,K], per_ch_meta list).
-    Else: returns (scale_vec [Cout], es_vec [Cout] int64, per_ch_meta list).
-    """
-    dev = flat.device
-    Cout, K = flat.shape
-    max_es = max(0, nsize - 1)
-    es_list = [int(e) for e in es_cands if int(e) <= max_es] or [0]
-    scales = torch.tensor([float(s) for s in sweep_scales], device=dev, dtype=torch.float32)
-
-    q_out = torch.empty_like(flat) if return_quantized else None
-    per_ch_meta = []
-    scale_out = torch.empty((Cout,), device=dev, dtype=torch.float32)
-    es_out = torch.empty((Cout,), device=dev, dtype=torch.int64)
-
-    for c0 in range(0, Cout, ch_batch):
-        c1 = min(Cout, c0 + ch_batch)
-        X = flat[c0:c1]
-        B = X.size(0)
-        sp = torch.sum(X * X, dim=1) + EPS
-
-        best_sqnr = torch.full((B,), -1e30, device=dev, dtype=torch.float32)
-        best_q = torch.zeros((B, K), device=dev, dtype=torch.float32)
-        best_es = torch.zeros((B,), device=dev, dtype=torch.int32)
-        best_l2 = torch.zeros((B,), device=dev, dtype=torch.int32)
-
-        for s in scales:
-            Xs = X * s
-            for es in es_list:
-                q = posit_quantize(Xs, nsize=nsize, es=int(es), scale=1.0) / s
-                noise = torch.sum((X - q) ** 2, dim=1) + EPS
-                sqnr = 10.0 * torch.log10(sp / noise)
-                mask = sqnr > best_sqnr
-                if mask.any():
-                    best_sqnr = torch.where(mask, sqnr, best_sqnr)
-                    best_q = torch.where(mask[:, None], q, best_q)
-                    best_es = torch.where(mask, torch.tensor(es, device=dev, dtype=torch.int32), best_es)
-                    l2 = int(round(math.log2(float(s.item()))))
-                    best_l2 = torch.where(mask, torch.tensor(l2, device=dev, dtype=torch.int32), best_l2)
-
-        if return_quantized:
-            q_out[c0:c1] = best_q
-
-        sch = torch.pow(2.0, best_l2.to(dtype=torch.float32))
-        scale_out[c0:c1] = sch
-        es_out[c0:c1] = best_es.to(torch.int64)
-
-        best_sqnr_cpu = best_sqnr.detach().cpu().tolist()
-        best_es_cpu = best_es.detach().cpu().tolist()
-        best_l2_cpu = best_l2.detach().cpu().tolist()
-        for i in range(B):
-            per_ch_meta.append({
-                "channel": int(c0 + i),
-                "format": f"posit{int(nsize)}",
-                "sqnr": float(best_sqnr_cpu[i]),
-                "log2_scale": int(best_l2_cpu[i]),
-                "es": int(best_es_cpu[i]),
-                "nsize": int(nsize),
-            })
-
-    if return_quantized:
-        return q_out, per_ch_meta
-    return scale_out, es_out, per_ch_meta
-
 
 @torch.no_grad()
-def per_channel_scales_es_batched(
-    layer_weight: torch.Tensor,
-    nsize: int,
-    es_cands,
-    sweep_scales,
-    ch_batch: int,
-):
-    """SQNR-optimal per-output-channel scale (float) and es (int) for GPTQ+Posit path."""
-    dev = layer_weight.device
-    W = layer_weight.detach().to(dtype=torch.float32, device=dev)
-    flat = W.view(W.size(0), -1)
-    scale_vec, es_vec, meta = _per_channel_sqnr_search_batched(
-        flat, nsize, es_cands, sweep_scales, ch_batch, return_quantized=False
-    )
-    return scale_vec, es_vec, meta
-
-
-@torch.no_grad()
-def per_channel_quantize_fixed_nsize_batched(layer_weight: torch.Tensor,
-                                             nsize: int,
-                                             es_cands,
-                                             sweep_scales,
-                                             ch_batch: int):
-    """
-    layer_weight: [Cout, K] tensor on model device.
-    Returns:
-      q_w: quantized weight, same shape/device/dtype as layer_weight
-      per_ch_meta: list of dicts (channel, log2_scale, es, sqnr)  (small)
-    """
-    dev = layer_weight.device
-    out_dtype = layer_weight.dtype
-    W = layer_weight.detach().to(dtype=torch.float32, device=dev)
-    flat = W.view(W.size(0), -1)
-    q_out, per_ch_meta = _per_channel_sqnr_search_batched(
-        flat, nsize, es_cands, sweep_scales, ch_batch, return_quantized=True
-    )
-    q_w = q_out.view_as(W).to(dtype=out_dtype, device=dev)
-    return q_w, per_ch_meta
-
-@torch.no_grad()
-def eval_wikitext_ppl(model, tokenizer, seqlen: int, forward_dtype: str):
-    model.eval()
-
-    test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    enc = tokenizer("\n\n".join(test["text"]), return_tensors="pt", add_special_tokens=False)
-    ids = enc.input_ids  # CPU
-
-    nsamples = ids.numel() // seqlen
-    if nsamples == 0:
-        raise ValueError(f"Not enough tokens for seqlen={seqlen}")
-
-    try:
-        dev = next(p.device for p in model.parameters() if p.device.type != "meta")
-    except StopIteration:
-        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    use_amp = (forward_dtype in ["fp16", "bf16"]) and (dev.type == "cuda")
-    amp_dtype = torch.float16 if forward_dtype == "fp16" else torch.bfloat16
-
-    if dev.type == "cuda":
-        autocast_ctx = torch.cuda.amp.autocast(enabled=use_amp, dtype=amp_dtype)
-    else:
-        class _NoOp:
-            def __enter__(self): return None
-            def __exit__(self, *a): return False
-        autocast_ctx = _NoOp()
-
-    nll_sum = 0.0
-    for i in tqdm(range(nsamples), desc="PPL", unit="chunk"):
-        batch = ids[:, i * seqlen:(i + 1) * seqlen].to(dev)
-        with autocast_ctx:
-            logits = model(batch).logits  # (B, T, V)
-
-        shift_logits = logits[:, :-1, :].contiguous().float()
-        shift_labels = batch[:, 1:].contiguous()
-        loss = F.cross_entropy(shift_logits.view(-1, shift_logits.size(-1)),
-                               shift_labels.view(-1))
-        nll_sum += (loss.item() * seqlen)
-
-        if dev.type == "cuda":
-            del batch, logits, shift_logits, shift_labels, loss
-            torch.cuda.empty_cache()
-
-    ppl = math.exp(nll_sum / (nsamples * seqlen))
-    return float(ppl)
-def make_fwd_autocast(device: torch.device, forward_dtype: str):
-    use_amp = (forward_dtype in ["fp16", "bf16"]) and (device.type == "cuda")
-    amp_dtype = torch.float16 if forward_dtype == "fp16" else torch.bfloat16
-    if device.type == "cuda":
-        return lambda: torch.cuda.amp.autocast(enabled=use_amp, dtype=amp_dtype)
-
-    class _NoOp:
-        def __enter__(self):
-            return None
-
-        def __exit__(self, *a):
-            return False
-
-    return lambda: _NoOp()
+def per_channel_quantize_fixed_nsize_batched(layer_weight: torch.Tensor, nsize: int, es_cands,
+                                             sweep_scales, ch_batch: int):
+    """Quantize a [Cout, K] weight; return (q_w in the input dtype, per-channel meta)."""
+    log2s = [int(round(math.log2(s))) for s in sweep_scales]
+    res = search_channels(layer_weight.view(layer_weight.size(0), -1), nsize, es=list(es_cands),
+                          log2_min=min(log2s), log2_max=max(log2s), ch_batch=ch_batch)
+    meta = [
+        {"channel": c, "format": f"posit{nsize}", "sqnr": sq, "log2_scale": l2, "es": e, "nsize": nsize}
+        for c, (sq, l2, e) in enumerate(zip(res.sqnr.tolist(), res.log2_scale.tolist(), res.es.tolist()))
+    ]
+    return res.q.view_as(layer_weight).to(layer_weight.dtype), meta
 
 
 def main():
     args = get_args()
     device = torch.device(args.device)
-    torch_dtype = get_torch_dtype(args.dtype)
+    torch_dtype = DTYPES[args.dtype]
 
     preset = MODEL_PRESETS[args.model]
     hf_id = preset["hf_id"]
@@ -359,16 +147,11 @@ def main():
 
     # Candidate scales (powers of two)
     sweep_scales = [2.0 ** k for k in range(args.log2_min, args.log2_max + 1)]
-    act_hook = make_act_hook(args.use_act_quant, args.act_exp, args.act_man)
+    act_hook = make_act_hook(args.act_exp, args.act_man)
 
-    # Collect target layers
-    target_layers = []
-    for name, mod in model.named_modules():
-        if should_skip_layer(name, mod, skip_lm_head=args.skip_lm_head, quantize_embeddings=args.quantize_embeddings):
-            continue
-        if is_quant_linear(mod) and hasattr(mod, "weight") and isinstance(mod.weight, torch.Tensor):
-            if mod.weight.dim() == 2:
-                target_layers.append((name, mod))
+    target_layers = list(quantizable_layers(model, skip_lm_head=args.skip_lm_head,
+                                            quantize_embeddings=args.quantize_embeddings,
+                                            include_named_linear=True))
 
     # weight_format is a human-readable alias; nsize is the source of truth.
     # If --weight_format was passed, it overrides --nsize (with a warning on mismatch).
@@ -390,13 +173,13 @@ def main():
     with torch.no_grad():
         for name, mod in tqdm(target_layers, desc="Quantizing layers"):
             # Per-channel search assumes dim 0 = Cout. HF Conv1D stores (Cin, Cout);
-            # transpose in and back out so scale/es search is per-output-channel.
-            W_in = _to_cout_first(mod, mod.weight)
+            # transpose in and back out so the scale search is per-output-channel.
+            W_in = to_cout_first(mod, mod.weight)
             q_w, per_ch = per_channel_quantize_fixed_nsize_batched(
                 W_in, nsize=args.nsize, es_cands=args.es_candidates,
                 sweep_scales=sweep_scales, ch_batch=args.ch_batch
             )
-            mod.weight.data = _from_cout_first(mod, q_w)
+            mod.weight.data = from_cout_first(mod, q_w)
 
             if args.use_act_quant and not getattr(mod, "_act_quant_hooked", False):
                 mod.register_forward_pre_hook(act_hook)
@@ -442,8 +225,9 @@ def main():
     print(f"[Format Usage] total={format_usage_summary['total_channels']} "
           f"counts={format_usage_summary['counts']} ratios={format_usage_summary['ratios']}")
 
-    # Chunked non-overlapping PPL
-    ppl = eval_wikitext_ppl(model, tok, seqlen=args.ppl_seqlen, forward_dtype=args.dtype)
+    # Chunked non-overlapping PPL (CUDA autocast in the forward dtype)
+    amp = torch_dtype if args.dtype in ("fp16", "bf16") else None
+    ppl = perplexity(model, wikitext2_ids(tok), seqlen=args.ppl_seqlen, autocast_dtype=amp, progress=True)
     print(f"\nPerplexity ({args.model}, {args.weight_format}, nsize={args.nsize}) [seqlen={args.ppl_seqlen}, fwd={args.dtype}]: {ppl:.4f}")
 
     with open(os.path.join(args.save_dir, "metrics.json"), "w") as f:

@@ -10,22 +10,20 @@
 #   layer, win_start, win_end, ppl_new, delta_ppl, seconds,
 #   override_nsize, channel_window, eval_batch_size, l2_diff_vs_baseline
 
-import argparse, os, json, math, time, csv, sys
-from typing import List, Tuple, Dict
-import numpy as np
+import argparse, os, json, time, csv, sys
+from typing import List, Tuple
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from tqdm import tqdm
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 import transformers
-import transformers.modeling_utils as modeling_utils
 
 # posit quantize kernel
-from qtorch_plus.quant import posit_quantize
+from flexposit.formats import posit_quantize
 
 from flexposit.models import MODEL_PRESETS
+from flexposit.eval import perplexity, wikitext2_ids as encode_wikitext2_cpu
+from flexposit.utils import is_quant_linear, should_skip_layer
 
 transformers.logging.set_verbosity_error()
 EPS = 1e-8
@@ -113,17 +111,10 @@ def get_torch_dtype(tag: str):
     return torch.float16 if tag == "fp16" else torch.float32
 
 
-def is_quant_linear(mod):
-    # GPT-2 uses modeling_utils.Conv1D for linears; OPT/LLaMA use nn.Linear
-    return isinstance(mod, (nn.Linear, modeling_utils.Conv1D))
 
 
-def should_skip_layer(name: str, mod: nn.Module, skip_lm_head: bool, quantize_embeddings: bool):
-    if skip_lm_head and (name == "lm_head" or name.endswith(".lm_head")):
-        return True
-    if isinstance(mod, nn.Embedding) and not quantize_embeddings:
-        return True
-    return False
+
+
 
 
 @torch.no_grad()
@@ -270,83 +261,13 @@ def quantize_window_gpu(
     return out.view(W.shape)  # CPU float32
 
 
-@torch.no_grad()
-def encode_wikitext2_cpu(tokenizer) -> torch.Tensor:
-    test = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
-    enc = tokenizer("\n\n".join(test["text"]), return_tensors="pt", add_special_tokens=False)
-    return enc.input_ids  # CPU [1, T]
 
-@torch.no_grad()
+
 def eval_wikitext_batched(model, ids_cpu: torch.Tensor, seqlen: int,
-                                 use_fp16_fwd: bool, batch_chunks: int,
-                                 show_progress: bool = False) -> float:
-    """
-    Exact chunked non-overlapping PPL evaluator (batched).
-    Exact non-overlapping chunked evaluator, fp32 loss accumulation.
-    """
-    model.eval()
-
-    # Find device where the model lives
-    try:
-        dev = next(p.device for p in model.parameters() if p.device.type != "meta")
-    except StopIteration:
-        dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # Autocast policy
-    if dev.type == "cuda":
-        autocast_ctx = torch.cuda.amp.autocast(enabled=use_fp16_fwd, dtype=torch.float16)
-    else:
-        class _NoOp:
-            def __enter__(self): return None
-            def __exit__(self, *a): return False
-        autocast_ctx = _NoOp()
-
-    # Prepare iteration
-    nsamples = ids_cpu.numel() // seqlen
-    if nsamples == 0:
-        raise ValueError(f"Not enough tokens for seqlen={seqlen}")
-    batch_chunks = max(1, int(batch_chunks))
-
-    iterator = range(0, nsamples, batch_chunks)
-    if show_progress:
-        try:
-            from tqdm.auto import tqdm as _tqdm
-            iterator = _tqdm(iterator, total=(nsamples + batch_chunks - 1)//batch_chunks,
-                             desc=f"PPL (B={batch_chunks}, T={seqlen})", dynamic_ncols=True)
-        except Exception:
-            pass
-
-    nll_sum = 0.0
-    processed_tokens = 0
-
-    for i in iterator:
-        j = min(i + batch_chunks, nsamples)
-        # Stack chunks -> [B, seqlen]
-        batch = torch.cat(
-            [ids_cpu[:, k*seqlen:(k+1)*seqlen] for k in range(i, j)],
-            dim=0
-        ).to(dev)
-
-        with autocast_ctx:
-            logits = model(batch).logits  # [B, T, V]
-
-        shift_logits = logits[:, :-1, :].contiguous().float()
-        shift_labels = batch[:, 1:].contiguous()
-        loss = F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1)
-        )
-
-        # Denominator: total-token count (not batches)
-        nll_sum += loss.item() * (j - i) * seqlen
-        processed_tokens += (j - i) * seqlen
-
-        if dev.type == "cuda":
-            del batch, logits, shift_logits, shift_labels, loss
-            torch.cuda.empty_cache()
-
-    ppl = math.exp(nll_sum / processed_tokens)
-    return float(ppl)
+                          use_fp16_fwd: bool, batch_chunks: int,
+                          show_progress: bool = False) -> float:
+    return perplexity(model, ids_cpu, seqlen, autocast_dtype=torch.float16 if use_fp16_fwd else None,
+                      batch_size=batch_chunks, progress=show_progress)
 
 
 def main():

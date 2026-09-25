@@ -15,17 +15,14 @@
 # CSV format is identical to the upstream script; win_start/win_end now index
 # the Cout axis on Conv1D layers.
 
-import argparse, os, json, math, time, csv, sys
+import argparse, os, json, time, csv, sys
 from typing import List, Tuple
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from tqdm import tqdm
-from datasets import load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 import transformers
-import transformers.modeling_utils as modeling_utils
+from transformers.pytorch_utils import Conv1D
 
 # Reuse the sibling channel-window PPL-probe generator.
 from . import ppl_probe as sens_up  # noqa: E402
@@ -146,7 +143,7 @@ def main():
         if sens_up.is_quant_linear(mod):
             if getattr(mod, "weight", None) is not None and mod.weight.dim() == 2:
                 target_layers.append((name, mod))
-    n_conv1d = sum(1 for _, m in target_layers if isinstance(m, modeling_utils.Conv1D))
+    n_conv1d = sum(1 for _, m in target_layers if isinstance(m, Conv1D))
     n_lin = len(target_layers) - n_conv1d
     print(f"Layers to test: {len(target_layers)} (Conv1D={n_conv1d}, Linear={n_lin}) | "
           f"nsize={args.override_nsize} | cw={args.channel_window} | axis=per-Cout", flush=True)
@@ -181,7 +178,7 @@ def main():
             continue
 
         # Per-Cout orientation for the window search:
-        is_conv1d = isinstance(mod, modeling_utils.Conv1D)
+        is_conv1d = isinstance(mod, Conv1D)
         if is_conv1d:
             W_src_effective = W_src_raw.transpose(0, 1).contiguous()   # (Cout, Cin)
         else:
