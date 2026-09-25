@@ -19,7 +19,8 @@ def main():
     p.add_argument("--act_quant", choices=["none", "fp8_e4m3"], default="none")
     p.add_argument("--seqlen", type=int, default=2048)
     p.add_argument("--dtype", choices=["fp16", "bf16", "fp32"], default="fp16")
-    p.add_argument("--trust_remote_code", action=argparse.BooleanOptionalAction, default=True)
+    p.add_argument("--trust_remote_code", action=argparse.BooleanOptionalAction, default=False,
+                   help="Run custom model code from the Hub (only needed for non-native architectures).")
     a = p.parse_args()
 
     td = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[a.dtype]

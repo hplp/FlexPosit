@@ -1,0 +1,4 @@
+# sdist extras so `pytest` runs from an unpacked source distribution.
+include CITATION.cff
+recursive-include tests *.py *.json
+include hardware/model/flexposit_rtl_exact.py

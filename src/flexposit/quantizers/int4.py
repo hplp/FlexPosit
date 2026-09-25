@@ -56,7 +56,8 @@ def main():
     p.add_argument("--seqlen", type=int, default=2048)
     p.add_argument("--dtype", choices=["fp16", "bf16", "fp32"], default="fp16")
     p.add_argument("--save_dir", required=True, help="Output dir (writes metrics.json)")
-    p.add_argument("--trust_remote_code", action="store_true", default=True)
+    p.add_argument("--trust_remote_code", action=argparse.BooleanOptionalAction, default=False,
+                   help="Run custom model code from the Hub (only needed for non-native architectures).")
     a = p.parse_args()
 
     os.makedirs(a.save_dir, exist_ok=True)

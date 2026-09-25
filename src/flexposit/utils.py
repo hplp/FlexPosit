@@ -7,9 +7,13 @@ from typing import Iterator
 
 import torch
 import torch.nn as nn
+import transformers
 from transformers.pytorch_utils import Conv1D
 
 DTYPES = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}
+
+# from_pretrained's dtype argument was renamed torch_dtype -> dtype in transformers 4.56.
+_DTYPE_KW = "dtype" if tuple(int(v) for v in transformers.__version__.split(".")[:2]) >= (4, 56) else "torch_dtype"
 
 
 def is_conv1d(mod: nn.Module) -> bool:
@@ -84,7 +88,7 @@ def load_model(name_or_path: str, dtype: str | torch.dtype = "fp16", device: str
     trust = preset.get("trust_remote_code", False)
     token = hf_token or os.environ.get("HF_TOKEN")
     model = AutoModelForCausalLM.from_pretrained(
-        hf_id, torch_dtype=torch_dtype, trust_remote_code=trust, token=token,
+        hf_id, **{_DTYPE_KW: torch_dtype}, trust_remote_code=trust, token=token,
         low_cpu_mem_usage=True)
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"

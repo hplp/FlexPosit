@@ -20,6 +20,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import transformers
 from transformers.pytorch_utils import Conv1D
 
+from flexposit.api import sensitivity_csv
 from flexposit.formats import posit_quantize
 
 from flexposit.models import MODEL_PRESETS
@@ -38,7 +39,8 @@ def get_args():
     p.add_argument("--base_dir", required=True)
     p.add_argument("--fp32_reference_dir", default=None,
                    help="HF id or local FP checkpoint dir. Optional if --model is given.")
-    p.add_argument("--sensitivity_csv", required=True)
+    p.add_argument("--sensitivity_csv", required=True,
+                   help="Sensitivity CSV path, or a shipped model short name (e.g. phi-2).")
     p.add_argument("--out_dir", required=True)
 
     # quantization knobs
@@ -50,14 +52,14 @@ def get_args():
     # compute/runtime
     p.add_argument("--dtype", choices=["fp16","bf16","fp32"], default="fp16")
     p.add_argument("--device_map", choices=["none","auto"], default="none")
-    p.add_argument("--skip_lm_head", action="store_true", default=True)
+    p.add_argument("--skip_lm_head", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--quantize_embeddings", action="store_true", default=False)
 
     # Mode A: budget (target average bits)
     p.add_argument("--target_avg_bits", type=float, default=None)
     p.add_argument("--base_bits", type=float, default=4.0)
     p.add_argument("--upgrade_bits", type=float, default=5.0)
-    p.add_argument("--allow_positive_to_meet_budget", action="store_true", default=True)
+    p.add_argument("--allow_positive_to_meet_budget", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--downgrade", action="store_true", default=False,
                    help="Downgrade least-sensitive windows from upgrade_bits to base_bits, instead of "
                         "upgrading most-sensitive windows from base_bits to upgrade_bits. "
@@ -108,7 +110,7 @@ def read_sensitivity_windows(csv_path: str) -> List[Tuple[str, int, int, float, 
     Return rows as: (layer, win_start, win_end, delta_ppl, channel_window)
     """
     rows = []
-    with open(csv_path, "r") as f:
+    with open(sensitivity_csv(csv_path), "r") as f:
         r = csv.DictReader(f)
         for row in r:
             layer = (row.get("layer") or "").strip()

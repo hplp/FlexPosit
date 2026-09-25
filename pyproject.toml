@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,13 +7,19 @@ name = "flexposit"
 version = "0.2.0"
 description = "FlexPosit: mixed-precision Posit quantization for LLMs, with matching accelerator RTL."
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Yimin Gao", email = "yg9bq@virginia.edu" }]
 requires-python = ">=3.10"
 keywords = ["posit", "quantization", "llm", "mixed-precision", "accelerator", "hardware"]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 # Minimal runtime requirements. requirements.txt pins the exact versions used
@@ -33,10 +39,12 @@ eval = ["lm-eval>=0.4"]
 plot = ["matplotlib"]
 # qtorch_plus is only needed to cross-check flexposit.formats (FLEXPOSIT_BACKEND=qtorch).
 qtorch = ["qtorch_plus==0.2.0", "ninja"]
-dev = ["pytest", "ruff"]
+dev = ["pytest", "ruff", "build", "twine"]
 
 [project.urls]
 Homepage = "https://github.com/hplp/FlexPosit"
+Documentation = "https://github.com/hplp/FlexPosit/blob/main/docs/cli.md"
+Issues = "https://github.com/hplp/FlexPosit/issues"
 Paper = "https://arxiv.org/abs/2609.04724"
 Artifact = "https://github.com/hplp/FlexPosit_artifact"
 
@@ -48,6 +56,9 @@ flexposit-ppl = "flexposit.ppl:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["flexposit*"]
+
+[tool.setuptools.package-data]
+flexposit = ["data/sensitivity/*.csv"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

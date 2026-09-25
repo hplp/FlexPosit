@@ -111,7 +111,7 @@ def main():
     p.add_argument("--dtype", choices=["fp16", "bf16"], default="fp16")
     p.add_argument("--fisher_seqlen", type=int, default=512)
     p.add_argument("--n_calib", type=int, default=128)
-    p.add_argument("--skip_lm_head", action="store_true", default=True)
+    p.add_argument("--skip_lm_head", action=argparse.BooleanOptionalAction, default=True)
     args = p.parse_args()
 
     if args.ref_id is None:

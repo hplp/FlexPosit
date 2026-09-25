@@ -12,6 +12,7 @@ test chip moves to FP8 activations and one accumulator per PE.
 
 ```bash
 sudo apt install iverilog     # or on macOS: brew install icarus-verilog
+pip install numpy             # used by the Python reference model
 cd hardware
 make test        # exhaustive single-PE check + random GEMM tiles through the array (~1 min)
 make wave        # VCD of one small tile for GTKWave

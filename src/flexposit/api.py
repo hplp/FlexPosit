@@ -3,7 +3,7 @@
     import flexposit
     model, tok = flexposit.load_model("llama-2-7b")
     cfg = flexposit.FlexPositConfig(bits=4.5)
-    state = flexposit.quantize(model, cfg, sensitivity="data/sensitivity/llama-2-7b.csv")
+    state = flexposit.quantize(model, cfg, sensitivity="llama-2-7b")
     flexposit.save(model, tok, state, "out/llama-2-7b-flexposit-4.5")
 
 ``quantize`` implements the paper's channel-window mixed precision in budget
@@ -25,6 +25,7 @@ import csv
 import json
 import math
 import os
+from importlib import resources
 from dataclasses import asdict, dataclass, field
 
 import torch
@@ -34,7 +35,7 @@ from flexposit.core import search_channels
 from flexposit.utils import from_cout_first, is_conv1d, quantizable_layers, to_cout_first
 
 __all__ = ["FlexPositConfig", "LayerState", "QuantState", "quantize", "plan_windows",
-           "read_sensitivity", "save", "load_state"]
+           "read_sensitivity", "sensitivity_csv", "shipped_sensitivity", "save", "load_state"]
 
 STATE_FILE = "flexposit_state.safetensors"
 CONFIG_FILE = "flexposit_config.json"
@@ -103,11 +104,30 @@ class QuantState:
                 f"window bits {self.window_bits:.3f} | bits/weight {self.avg_bits:.3f}")
 
 
+def shipped_sensitivity() -> list[str]:
+    """Model short names with a sensitivity CSV bundled in the package."""
+    root = resources.files("flexposit") / "data" / "sensitivity"
+    return sorted(p.name[:-4] for p in root.iterdir() if p.name.endswith(".csv"))
+
+
+def sensitivity_csv(name_or_path: str | os.PathLike) -> str:
+    """Path of a sensitivity CSV: an existing file, or a shipped model short name (e.g. "mistral-7b")."""
+    if os.path.isfile(name_or_path):
+        return os.fspath(name_or_path)
+    shipped = resources.files("flexposit") / "data" / "sensitivity" / f"{name_or_path}.csv"
+    if shipped.is_file():
+        return str(shipped)
+    raise FileNotFoundError(f"No sensitivity CSV {str(name_or_path)!r}: not a file, and not one of the "
+                            f"shipped models {shipped_sensitivity()}")
+
+
 def read_sensitivity(path: str) -> list[tuple[str, int, int, float]]:
     """Rows (layer, win_start, win_end, delta_ppl) from a sensitivity CSV.
 
+    ``path`` may also be a shipped model short name (see :func:`shipped_sensitivity`).
     More negative ``delta_ppl`` = more PPL improvement when the window is upgraded.
     """
+    path = sensitivity_csv(path)
     rows = []
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
@@ -147,7 +167,8 @@ def quantize(model: nn.Module, config: FlexPositConfig | None = None, sensitivit
              progress: bool = True) -> QuantState:
     """Quantize every Linear/Conv1D weight of ``model`` in place.
 
-    ``sensitivity`` is a CSV path (see data/sensitivity/) or a list of
+    ``sensitivity`` is a shipped model short name (e.g. "llama-2-7b"; see
+    :func:`shipped_sensitivity`), a CSV path, or a list of
     (layer, win_start, win_end, delta_ppl) rows. It is required when
     ``config.bits`` is above ``config.base_nsize``; compute one for a new model
     with ``python -m flexposit.sensitivity.fisher`` (fast) or
@@ -161,7 +182,7 @@ def quantize(model: nn.Module, config: FlexPositConfig | None = None, sensitivit
         if sensitivity is None:
             raise ValueError(
                 f"bits={config.bits} needs a sensitivity ranking to decide which channel windows get "
-                f"Posit{config.upgrade_nsize}. Pass sensitivity='data/sensitivity/<model>.csv', or create "
+                f"Posit{config.upgrade_nsize}. Pass sensitivity='<model short name>' for a shipped model, or create "
                 "one with `python -m flexposit.sensitivity.fisher`.")
         rows = read_sensitivity(sensitivity) if isinstance(sensitivity, (str, os.PathLike)) else list(sensitivity)
         state.upgraded_windows, state.total_windows = plan_windows(rows, {n for n, _ in layers}, config)

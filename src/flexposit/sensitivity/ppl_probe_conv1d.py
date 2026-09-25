@@ -72,7 +72,7 @@ def get_args():
     p.add_argument("--log2_max", type=int, default=9)
     p.add_argument("--max_scales_per_pass", type=int, default=8)
     p.add_argument("--max_es_per_pass", type=int, default=2)
-    p.add_argument("--skip_lm_head", action="store_true", default=True)
+    p.add_argument("--skip_lm_head", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--quantize_embeddings", action="store_true", default=False)
     p.add_argument("--batch_chunks", type=int, default=8)
     p.add_argument("--out_dir", required=True)
