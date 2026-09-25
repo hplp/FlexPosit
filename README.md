@@ -1,6 +1,7 @@
 # FlexPosit: Tunable Fractional Precision for LLM Inference Accelerators (MICRO 2026)
 
 [![tests](https://github.com/hplp/FlexPosit/actions/workflows/ci.yml/badge.svg)](https://github.com/hplp/FlexPosit/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/flexposit)](https://pypi.org/project/flexposit/)
 
 FlexPosit received all three MICRO 2026 artifact badges. To reproduce the
 paper's results exactly, use
@@ -31,12 +32,13 @@ pip install flexposit               # Python >= 3.10; includes WikiText-2 perple
 pip install "flexposit[eval]"       # optional: adds lm-evaluation-harness for downstream tasks (ARC, HellaSwag, ...)
 ```
 
-For the command-line scripts and the hardware, clone the repo and install it
-in editable mode instead:
+To modify the code, run the shell scripts, or simulate the accelerator RTL in
+`hardware/`, clone the repo and install it in editable mode instead; your
+changes take effect without reinstalling:
 
 ```bash
 git clone https://github.com/hplp/FlexPosit && cd FlexPosit
-pip install -e ".[dev]"
+pip install -e .                    # or -e ".[eval]" for downstream tasks
 ```
 
 ## Quick start
@@ -55,13 +57,17 @@ model, tok = flexposit.load_model("mistral-7b")          # preset name, HF id or
 state = flexposit.quantize(model, flexposit.FlexPositConfig(bits=4.4), sensitivity="mistral-7b")
 
 print(flexposit.wikitext2_perplexity(model, tok))        # WikiText-2, seqlen 2048
-flexposit.eval.lm_eval(model, tok, ["arc_easy"])         # any lm-eval task
+flexposit.eval.lm_eval(model, tok, ["arc_easy"])         # any lm-eval task; needs flexposit[eval]
 flexposit.save(model, tok, state, "out/mistral-7b-flexposit-4.4")
 ```
 
 `quantize` rounds each weight to its channel's Posit format in place, so the
 model runs anywhere a HuggingFace model runs; `state` records each channel's
 Posit size and scale. To sweep many bit widths, use the command line below.
+
+This example needs about 17 GB of GPU memory (a 24 GB card such as an RTX 4090
+works); quantizing and computing WikiText-2 perplexity take about 2.5 minutes on
+a 4090. Smaller models such as `phi-2` or `gpt2-large` need much less.
 
 ## Command line
 
@@ -71,6 +77,10 @@ WikiText-2 perplexity at each step. Results go to `out/`.
 
     bash scripts/01_quantize_base.sh phi-2   # quantize weights to Posit(4,1)
     bash scripts/02_mpq_sweep.sh    phi-2    # mixed-precision sweep over 4.0–5.0 bits
+
+`pip install flexposit` also installs these steps as commands:
+`flexposit-quantize` (Posit base), `flexposit-mpq` (mixed precision) and
+`flexposit-ppl` (perplexity); each takes `--help`.
 
 The shipped sensitivity CSVs hold the PPL-based sensitivity used in the paper.
 You can also profile your own, with a different configuration (e.g. the
