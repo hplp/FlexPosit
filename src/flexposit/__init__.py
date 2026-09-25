@@ -7,7 +7,7 @@
     print(flexposit.wikitext2_perplexity(model, tok))
 """
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from flexposit.api import (FlexPositConfig, QuantState, load_state, quantize, save, sensitivity_csv,
                            shipped_sensitivity)

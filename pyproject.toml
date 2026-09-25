@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flexposit"
-version = "0.2.0"
+version = "0.2.1"
 description = "FlexPosit: mixed-precision Posit quantization for LLMs, with matching accelerator RTL."
 readme = "README.md"
 license = "MIT"
