@@ -13,7 +13,7 @@ paper's results exactly, use
   <a href="https://github.com/hplp/FlexPosit_artifact"><img src="https://raw.githubusercontent.com/hplp/FlexPosit/main/assets/results_reproduced_v1_1.png" height="100" alt="Results Reproduced"></a>
 </p>
 
-FlexPosit is a Posit-based mixed-precision quantization framework for LLMs.
+FlexPosit is a Posit-based mixed-precision quantization framework for LLMs, with posit-based bit-serial systolic array. 
 It allocates higher precision to the channel windows whose quantization most
 affects perplexity. The paper tunes precision by combining Posit(4,1) and
 Posit(5,1) across channel windows; other Posit formats can be selected through
@@ -22,7 +22,7 @@ This repo contains:
 
 - **`flexposit`**, a Python package for quantizing HuggingFace models with
   FlexPosit.
-- **[`hardware/`](https://github.com/hplp/FlexPosit/blob/main/hardware)**, the RTL of the FlexPosit datapath, part of the
+- **[`hardware/`](https://github.com/hplp/FlexPosit/blob/main/hardware)**, the RTL of a FlexPosit accelerator, part of the
   test-chip version of FlexPosit in an ongoing 12 nm tapeout shuttle.
 
 ## Install
